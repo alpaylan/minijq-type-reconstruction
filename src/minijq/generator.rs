@@ -1,6 +1,6 @@
 use crate::minijq::types::{ObjectShape, RowTail, Type};
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 use serde_json::{Map, Number, Value};
 
 pub fn generate_value(ty: &Type, rng: &mut impl Rng, max_depth: usize) -> Option<Value> {
@@ -152,8 +152,8 @@ fn generate_object(shape: ObjectShape, rng: &mut impl Rng, max_depth: usize) -> 
 mod tests {
     use super::generate_value;
     use crate::minijq::types::{ObjectShape, Type};
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn never_generates_nothing() {
@@ -171,7 +171,10 @@ mod tests {
 
         for _ in 0..200 {
             let value = generate_value(&ty, &mut rng, 4).expect("value should generate");
-            assert!(ty.contains_value(&value), "generated value {value} does not match {ty}");
+            assert!(
+                ty.contains_value(&value),
+                "generated value {value} does not match {ty}"
+            );
         }
     }
 

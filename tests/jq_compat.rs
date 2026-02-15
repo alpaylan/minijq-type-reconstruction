@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use typereconstruction::minijq::{eval, parse_expr};
@@ -47,7 +47,10 @@ fn run_jq(filter: &str, input: &Value) -> Result<Value, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     if lines.len() != 1 {
         return Err(format!(
             "expected exactly one jq output value, got {}: {}",
@@ -103,22 +106,46 @@ fn jq_compat_success_cases() {
         ("{sum: (.a + .b), ok: (.a > .b)}", json!({"a": 3, "b": 1})),
         ("map(. + 1)", json!([1, 2, 3])),
         ("has(\"config\")", json!({"config": 1})),
-        ("contains({status: \"ok\"})", json!({"status": "ok", "x": 1})),
+        (
+            "contains({status: \"ok\"})",
+            json!({"status": "ok", "x": 1}),
+        ),
         ("startswith(\"pre\") or endswith(\"fix\")", json!("prefix")),
         ("sort | reverse", json!([3, 1, 2])),
         ("(.price | tonumber?) // 0 | abs", json!({"price": "-4.2"})),
-        ("(.price | tonumber?) // 0 | abs", json!({"price": "not-a-number"})),
+        (
+            "(.price | tonumber?) // 0 | abs",
+            json!({"price": "not-a-number"}),
+        ),
         ("try (.raw | tonumber) catch 0", json!({"raw": "12.5"})),
         ("try (.raw | tonumber) catch 0", json!({"raw": "x"})),
         (".csv | split(\",\") | join(\"-\")", json!({"csv": "a,b,c"})),
-        ("try (.scores | max) catch null", json!({"scores": [1, 5, 2]})),
+        (
+            "try (.scores | max) catch null",
+            json!({"scores": [1, 5, 2]}),
+        ),
         ("try (.scores | max) catch null", json!({"scores": []})),
-        ("try (.values | add) catch null", json!({"values": [1, 2, 3]})),
+        (
+            "try (.values | add) catch null",
+            json!({"values": [1, 2, 3]}),
+        ),
         ("try (.values | add) catch null", json!({"values": [null]})),
-        (".data[.key]? // \"missing\"", json!({"data": {"x": 7}, "key": "x"})),
-        (".data[.key]? // \"missing\"", json!({"data": 10, "key": "x"})),
-        ("if . == true or . == false then 1 else error end", json!(true)),
-        ("if . == true or . == false then 1 else error end", json!(false)),
+        (
+            ".data[.key]? // \"missing\"",
+            json!({"data": {"x": 7}, "key": "x"}),
+        ),
+        (
+            ".data[.key]? // \"missing\"",
+            json!({"data": 10, "key": "x"}),
+        ),
+        (
+            "if . == true or . == false then 1 else error end",
+            json!(true),
+        ),
+        (
+            "if . == true or . == false then 1 else error end",
+            json!(false),
+        ),
         ("try error(\"boom\") catch 0", json!(null)),
         // Ported from tjq/tests/short/test4.
         (
@@ -166,7 +193,10 @@ fn jq_compat_shared_error_cases() {
         ("split(\",\")", json!(5)),
         ("join(\",\")", json!([1, {"a": 1}])),
         (".[\"x\"]", json!(5)),
-        ("if . == true or . == false then 1 else error end", json!(null)),
+        (
+            "if . == true or . == false then 1 else error end",
+            json!(null),
+        ),
         ("error(\"boom\")", json!(null)),
     ];
 

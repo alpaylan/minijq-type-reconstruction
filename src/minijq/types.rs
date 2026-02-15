@@ -1,15 +1,16 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RowTail {
     Closed,
     Open(Box<Type>),
     Var(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ObjectShape {
     pub fields: BTreeMap<String, Type>,
     pub tail: RowTail,
@@ -61,7 +62,7 @@ impl ObjectShape {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Type {
     Never,
     Any,
@@ -153,7 +154,9 @@ impl Type {
                 Type::union(universe.into_iter().map(|t| t.subtract(&rhs)))
             }
             (Type::Union(items), rhs) => Type::union(items.into_iter().map(|t| t.subtract(&rhs))),
-            (lhs, Type::Union(items)) => items.into_iter().fold(lhs, |acc, item| acc.subtract(&item)),
+            (lhs, Type::Union(items)) => {
+                items.into_iter().fold(lhs, |acc, item| acc.subtract(&item))
+            }
             (Type::Generic(a), Type::Generic(b)) if a == b => Type::Never,
             (Type::Generic(name), _) => Type::Generic(name),
             (lhs, rhs) if lhs == rhs => Type::Never,
@@ -214,7 +217,9 @@ impl Type {
                 }
             }
             (Type::Tuple(lhs_items), Type::NonEmptyArray(rhs_elem)) => {
-                if !lhs_items.is_empty() && lhs_items.iter().all(|item| item.is_subtype_of(&rhs_elem)) {
+                if !lhs_items.is_empty()
+                    && lhs_items.iter().all(|item| item.is_subtype_of(&rhs_elem))
+                {
                     Type::Never
                 } else {
                     Type::Tuple(lhs_items)
@@ -241,7 +246,9 @@ impl Type {
             (lhs, Type::Any) | (Type::Any, lhs) => lhs,
             (Type::Union(items), rhs) => Type::union(items.into_iter().map(|t| t.intersect(&rhs))),
             (lhs, Type::Union(items)) => Type::union(items.into_iter().map(|t| lhs.intersect(&t))),
-            (Type::Array(lhs), Type::Array(rhs)) => Type::Array(Box::new(lhs.intersect(&rhs))).normalize(),
+            (Type::Array(lhs), Type::Array(rhs)) => {
+                Type::Array(Box::new(lhs.intersect(&rhs))).normalize()
+            }
             (Type::NonEmptyArray(lhs), Type::NonEmptyArray(rhs)) => {
                 let item = lhs.intersect(&rhs).normalize();
                 if item.is_never() {
@@ -311,12 +318,15 @@ impl Type {
             (Type::Array(sub), Type::Array(sup)) => sub.is_subtype_of(&sup),
             (Type::NonEmptyArray(sub), Type::Array(sup)) => sub.is_subtype_of(&sup),
             (Type::NonEmptyArray(sub), Type::NonEmptyArray(sup)) => sub.is_subtype_of(&sup),
-            (Type::Tuple(items), Type::Array(sup)) => items.iter().all(|item| item.is_subtype_of(&sup)),
+            (Type::Tuple(items), Type::Array(sup)) => {
+                items.iter().all(|item| item.is_subtype_of(&sup))
+            }
             (Type::Tuple(items), Type::NonEmptyArray(sup)) => {
                 !items.is_empty() && items.iter().all(|item| item.is_subtype_of(&sup))
             }
             (Type::Tuple(sub), Type::Tuple(sup)) => {
-                sub.len() == sup.len() && sub.iter().zip(sup.iter()).all(|(a, b)| a.is_subtype_of(b))
+                sub.len() == sup.len()
+                    && sub.iter().zip(sup.iter()).all(|(a, b)| a.is_subtype_of(b))
             }
             (Type::Object(sub), Type::Object(sup)) => object_subtype(&sub, &sup),
             (Type::Generic(a), Type::Generic(b)) => a == b,
@@ -356,7 +366,11 @@ impl Type {
             Type::Array(inner) => format!("array<{}>", inner.stable_key()),
             Type::NonEmptyArray(inner) => format!("nonempty<{}>", inner.stable_key()),
             Type::Tuple(items) => {
-                let parts = items.iter().map(Type::stable_key).collect::<Vec<_>>().join(",");
+                let parts = items
+                    .iter()
+                    .map(Type::stable_key)
+                    .collect::<Vec<_>>()
+                    .join(",");
                 format!("tuple({parts})")
             }
             Type::Object(shape) => {
@@ -433,7 +447,9 @@ fn intersect_row_tail(lhs: RowTail, rhs: RowTail) -> RowTail {
                 RowTail::Open(Box::new(t))
             }
         }
-        (RowTail::Open(l), RowTail::Var(_)) | (RowTail::Var(_), RowTail::Open(l)) => RowTail::Open(l),
+        (RowTail::Open(l), RowTail::Var(_)) | (RowTail::Var(_), RowTail::Open(l)) => {
+            RowTail::Open(l)
+        }
         (RowTail::Var(a), RowTail::Var(b)) => {
             if a == b {
                 RowTail::Var(a)
@@ -754,7 +770,10 @@ mod tests {
     #[test]
     fn from_json_array_becomes_tuple() {
         let ty = Type::from_json_value(&json!([1, "x", true]));
-        assert_eq!(ty, Type::Tuple(vec![Type::Number, Type::String, Type::Bool]));
+        assert_eq!(
+            ty,
+            Type::Tuple(vec![Type::Number, Type::String, Type::Bool])
+        );
     }
 
     #[test]

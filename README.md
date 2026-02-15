@@ -22,6 +22,8 @@ Prototype for automatic input type reconstruction (inference) for a dynamically 
 Implemented:
 
 - A `minijq` AST, parser, evaluator, type system, random generator, and reconstruction loop.
+- Incremental reconstruction cache keyed by program name + source, persisted in `.mjqi` format:
+  - `.minijq.typecache.mjqi` stores the reconstructed valid input domain, output type, subset markers, and convergence status.
 - Structural JSON-like types with:
   - `Any`, `Never`, primitives.
   - `Array<T>`, `NonEmptyArray<T>`, tuples.
@@ -62,11 +64,59 @@ Validation status:
 - `cargo run`: all bundled examples converge.
 - jq compatibility includes ported cases inspired by `tjq/tests/short/test1` and `tjq/tests/short/test4`.
 
+## jq Compatibility Guide
+
+Status legend:
+- `Supported`: implemented and covered by tests/examples.
+- `Partial`: implemented but semantics differ from jq in notable cases.
+- `Missing`: not implemented yet.
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Core expressions (`.`, literals, `|`, `if ... then ... else ... end`) | `Supported` | Includes your `if . == true or . == false then 1 else error end` pattern. |
+| Error handling (`error`, `error("msg")`, `try ... catch ...`) | `Supported` | Explicit errors are catchable and tested against jq. |
+| Optional postfix (`expr?`) | `Supported` | Suppresses runtime errors into `null`. |
+| Field/index/lookup (`.k`, `.[n]`, `.[expr]`) | `Partial` | Non-negative indexing and dynamic lookup are supported; negative indices and slices are not. |
+| Comparisons and boolean ops (`==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `//`) | `Partial` | Mostly aligned; still needs broader parity validation on edge cases. |
+| Binary arithmetic operators (`+`, `-`, `*`, `/`) | `Partial` | Currently numeric-only for binary operators; jq overloads (string concat/repeat, object merge, array diff/concat, string split division) are not all implemented yet. |
+| Builtins currently listed in README | `Supported` | `length`, `map`, `select`, `contains`, `split`, `join`, `tonumber`, etc. |
+| Streaming model (multi-output filters) | `Missing` | Current evaluator returns a single JSON value, while jq is stream-based. |
+| Iterator syntax (`.[]`) | `Missing` | Not parsed/evaluated in jq stream semantics. |
+| Slice syntax (`.[a:b]`, `.[a:]`, `.[:b]`) | `Missing` | Not parsed/evaluated. |
+| Function definitions (`def f: ...;`) and calls | `Missing` | No `def`, `;`, or user-defined function environment yet. |
+| Variable bindings (`as $x`, `$x`) | `Missing` | No binder/variable syntax support yet. |
+| Structural control combinators (`reduce`, `foreach`, `until`) | `Missing` | Not implemented in parser/evaluator/type inference. |
+| Broader jq builtin surface (`range`, `del`, `to_entries`, `map_values`, `group_by`, regex builtins, etc.) | `Missing` | Only a focused subset is currently implemented. |
+| Modules/imports | `Missing` | No module system. |
+
+### Recommended parity order
+
+1. Finish overloaded semantics for binary `+ - * /` (highest payoff for correctness).
+2. Add stream core: `.[]`, then stream-aware `map`/`select` behavior.
+3. Add slice indexing and negative indexing.
+4. Add `def`, `as $x`, and `reduce` (unblocks many `tjq` cases).
+5. Expand builtin set incrementally with jq-compat tests.
+
 ## Run
 
 ```bash
 cargo test
 cargo run
+```
+
+The first `cargo run` reconstructs valid input domains and populates `.minijq.typecache.mjqi`. Later runs reuse cached reconstruction results when sources are unchanged, and derive runtime-informed schemes from that cached domain.
+
+Control cache behavior:
+
+```bash
+# custom cache location
+cargo run -- --type-cache ./cache/minijq-types.mjqi
+
+# force re-inference and overwrite cache entries
+cargo run -- --refresh-type-cache
+
+# disable cache for a run
+cargo run -- --no-type-cache
 ```
 
 Run jq compatibility tests only:

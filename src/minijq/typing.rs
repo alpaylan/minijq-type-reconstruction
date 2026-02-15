@@ -1,5 +1,6 @@
 use crate::minijq::ast::{BinaryOp, Expr, UnaryOp};
 use crate::minijq::types::{ObjectShape, RowTail, Type};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -172,7 +173,7 @@ impl Builtin {
             },
             Builtin::Min => TypeScheme {
                 vars: vec!["T".to_string()],
-            input: Type::NonEmptyArray(Box::new(Type::Generic("T".to_string()))),
+                input: Type::NonEmptyArray(Box::new(Type::Generic("T".to_string()))),
                 output: Type::Generic("T".to_string()),
             },
             Builtin::Max => TypeScheme {
@@ -203,7 +204,7 @@ impl Builtin {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeScheme {
     pub vars: Vec<String>,
     pub input: Type,
@@ -320,9 +321,12 @@ pub fn infer_expr_type(expr: &Expr, input: &Type) -> Type {
             let else_ty = infer_expr_type(else_branch, input);
             Type::union(vec![then_ty, else_ty])
         }
-        Expr::ArrayLiteral(items) => {
-            Type::Tuple(items.iter().map(|item| infer_expr_type(item, input)).collect())
-        }
+        Expr::ArrayLiteral(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|item| infer_expr_type(item, input))
+                .collect(),
+        ),
         Expr::ObjectLiteral(fields) => {
             let mut out = BTreeMap::new();
             for (k, v) in fields {
@@ -836,9 +840,12 @@ fn infer_poly(expr: &Expr, input: Type, ctx: &mut PolyInferCtx) -> Type {
             let else_ty = infer_poly(else_branch, input, ctx);
             Type::union(vec![then_ty, else_ty])
         }
-        Expr::ArrayLiteral(items) => {
-            Type::Tuple(items.iter().map(|item| infer_poly(item, input.clone(), ctx)).collect())
-        }
+        Expr::ArrayLiteral(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|item| infer_poly(item, input.clone(), ctx))
+                .collect(),
+        ),
         Expr::ObjectLiteral(fields) => {
             let mut out = BTreeMap::new();
             for (k, v) in fields {
@@ -953,9 +960,12 @@ impl PolyInferCtx {
             Type::NonEmptyArray(inner) => {
                 Type::NonEmptyArray(Box::new(self.resolve_type_inner(inner, visiting)))
             }
-            Type::Tuple(items) => {
-                Type::Tuple(items.iter().map(|item| self.resolve_type_inner(item, visiting)).collect())
-            }
+            Type::Tuple(items) => Type::Tuple(
+                items
+                    .iter()
+                    .map(|item| self.resolve_type_inner(item, visiting))
+                    .collect(),
+            ),
             Type::Object(shape) => {
                 let fields = shape
                     .fields
@@ -971,9 +981,11 @@ impl PolyInferCtx {
                 };
                 Type::Object(ObjectShape { fields, tail })
             }
-            Type::Union(items) => {
-                Type::union(items.iter().map(|item| self.resolve_type_inner(item, visiting)))
-            }
+            Type::Union(items) => Type::union(
+                items
+                    .iter()
+                    .map(|item| self.resolve_type_inner(item, visiting)),
+            ),
             other => other.clone(),
         }
     }
@@ -1215,9 +1227,12 @@ fn substitute_generics(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
         Type::NonEmptyArray(inner) => {
             Type::NonEmptyArray(Box::new(substitute_generics(inner, bindings)))
         }
-        Type::Tuple(items) => {
-            Type::Tuple(items.iter().map(|item| substitute_generics(item, bindings)).collect())
-        }
+        Type::Tuple(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|item| substitute_generics(item, bindings))
+                .collect(),
+        ),
         Type::Object(shape) => {
             let fields = shape
                 .fields
@@ -1231,7 +1246,9 @@ fn substitute_generics(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
             };
             Type::Object(ObjectShape { fields, tail })
         }
-        Type::Union(items) => Type::union(items.iter().map(|item| substitute_generics(item, bindings))),
+        Type::Union(items) => {
+            Type::union(items.iter().map(|item| substitute_generics(item, bindings)))
+        }
         other => other.clone(),
     }
 }
@@ -1270,7 +1287,7 @@ fn collect_free_generics(ty: &Type, into: &mut BTreeSet<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{infer_expr_scheme, infer_expr_type, Builtin};
+    use super::{Builtin, infer_expr_scheme, infer_expr_type};
     use crate::minijq::ast::Expr;
     use crate::minijq::types::{ObjectShape, RowTail, Type};
 
@@ -1372,16 +1389,17 @@ mod tests {
         );
         assert_eq!(
             infer_expr_type(&sort, &input),
-            Type::Array(Box::new(Type::union(vec![Type::Bool, Type::Number, Type::String])))
+            Type::Array(Box::new(Type::union(vec![
+                Type::Bool,
+                Type::Number,
+                Type::String
+            ])))
         );
     }
 
     #[test]
     fn infer_lookup_with_string_key_on_object() {
-        let expr = Expr::lookup(
-            Expr::identity(),
-            Expr::literal(serde_json::json!("name")),
-        );
+        let expr = Expr::lookup(Expr::identity(), Expr::literal(serde_json::json!("name")));
         let input = Type::Object(ObjectShape::with_required_field("name", Type::String));
         assert_eq!(infer_expr_type(&expr, &input), Type::String);
     }
@@ -1418,7 +1436,10 @@ mod tests {
         let min = Expr::builtin(Builtin::Min, Expr::identity());
         let max = Expr::builtin(Builtin::Max, Expr::identity());
 
-        assert_eq!(infer_expr_type(&add, &Type::Array(Box::new(Type::Number))), Type::Number);
+        assert_eq!(
+            infer_expr_type(&add, &Type::Array(Box::new(Type::Number))),
+            Type::Number
+        );
         assert_eq!(
             infer_expr_type(&add, &Type::Array(Box::new(Type::String))),
             Type::String

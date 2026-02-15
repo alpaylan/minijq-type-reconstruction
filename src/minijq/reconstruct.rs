@@ -1,8 +1,8 @@
 use crate::minijq::ast::Expr;
-use crate::minijq::eval::{eval, RuntimeTypeError};
+use crate::minijq::eval::{RuntimeTypeError, eval};
 use crate::minijq::generator::generate_value;
 use crate::minijq::types::{ObjectShape, Type};
-use crate::minijq::typing::{infer_expr_scheme, infer_expr_type, TypeScheme};
+use crate::minijq::typing::{TypeScheme, infer_expr_scheme, infer_expr_type};
 use rand::Rng;
 use serde_json::Value;
 use std::fmt::Write;
@@ -124,7 +124,17 @@ pub fn reconstruct_input_type(
     config: &ReconstructionConfig,
     rng: &mut impl Rng,
 ) -> ReconstructionResult {
-    reconstruct_input_type_impl(program, config, rng, true)
+    let scheme = infer_expr_scheme(program);
+    reconstruct_input_type_impl(program, scheme, config, rng, true)
+}
+
+pub fn reconstruct_input_type_with_scheme(
+    program: &Expr,
+    scheme: TypeScheme,
+    config: &ReconstructionConfig,
+    rng: &mut impl Rng,
+) -> ReconstructionResult {
+    reconstruct_input_type_impl(program, scheme, config, rng, true)
 }
 
 pub fn reconstruct_input_type_unbiased(
@@ -132,16 +142,26 @@ pub fn reconstruct_input_type_unbiased(
     config: &ReconstructionConfig,
     rng: &mut impl Rng,
 ) -> ReconstructionResult {
-    reconstruct_input_type_impl(program, config, rng, false)
+    let scheme = infer_expr_scheme(program);
+    reconstruct_input_type_impl(program, scheme, config, rng, false)
+}
+
+pub fn reconstruct_input_type_unbiased_with_scheme(
+    program: &Expr,
+    scheme: TypeScheme,
+    config: &ReconstructionConfig,
+    rng: &mut impl Rng,
+) -> ReconstructionResult {
+    reconstruct_input_type_impl(program, scheme, config, rng, false)
 }
 
 fn reconstruct_input_type_impl(
     program: &Expr,
+    scheme: TypeScheme,
     config: &ReconstructionConfig,
     rng: &mut impl Rng,
     seed_from_scheme: bool,
 ) -> ReconstructionResult {
-    let scheme = infer_expr_scheme(program);
     let mut candidate = if seed_from_scheme {
         Type::Any
             .intersect(&scheme.input.erase_generics())
@@ -386,12 +406,12 @@ fn preserve_precise_failure_region(err: &RuntimeTypeError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{reconstruct_input_type, reconstruct_input_type_unbiased, ReconstructionConfig};
+    use super::{ReconstructionConfig, reconstruct_input_type, reconstruct_input_type_unbiased};
     use crate::minijq::ast::Expr;
-    use crate::minijq::typing::Builtin;
     use crate::minijq::types::{ObjectShape, Type};
-    use rand::rngs::StdRng;
+    use crate::minijq::typing::Builtin;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
     use serde_json::json;
     use std::collections::BTreeSet;
 
@@ -426,7 +446,10 @@ mod tests {
 
         let result = reconstruct_input_type(&expr, &config, &mut rng);
         assert!(result.converged);
-        assert_eq!(result.final_input_type, Type::NonEmptyArray(Box::new(Type::Any)));
+        assert_eq!(
+            result.final_input_type,
+            Type::NonEmptyArray(Box::new(Type::Any))
+        );
     }
 
     #[test]
@@ -541,7 +564,10 @@ mod tests {
 
         let result = reconstruct_input_type(&expr, &config, &mut rng);
         assert!(result.converged);
-        assert_eq!(result.final_input_type, Type::NonEmptyArray(Box::new(Type::Any)));
+        assert_eq!(
+            result.final_input_type,
+            Type::NonEmptyArray(Box::new(Type::Any))
+        );
     }
 
     #[test]
@@ -579,10 +605,7 @@ mod tests {
             result.final_input_type,
             Type::union(vec![Type::Number, Type::String])
         );
-        assert_eq!(
-            result.annotated_input_type(),
-            "Number | Subset<String>"
-        );
+        assert_eq!(result.annotated_input_type(), "Number | Subset<String>");
         assert!(result.subset_types.iter().any(|ty| ty == &Type::String));
     }
 
@@ -635,7 +658,10 @@ mod tests {
                 Expr::builtin(Builtin::StartsWith, Expr::literal(json!("pre"))),
             ),
             ("first", Expr::builtin(Builtin::First, Expr::identity())),
-            ("strict_tonumber", Expr::builtin(Builtin::ToNumber, Expr::identity())),
+            (
+                "strict_tonumber",
+                Expr::builtin(Builtin::ToNumber, Expr::identity()),
+            ),
         ];
 
         for (i, (name, expr)) in cases.into_iter().enumerate() {
@@ -659,8 +685,11 @@ mod tests {
                 "final input type mismatch for {name}"
             );
 
-            let seeded_subsets: BTreeSet<String> =
-                seeded.subset_types.iter().map(ToString::to_string).collect();
+            let seeded_subsets: BTreeSet<String> = seeded
+                .subset_types
+                .iter()
+                .map(ToString::to_string)
+                .collect();
             let unbiased_subsets: BTreeSet<String> = unbiased
                 .subset_types
                 .iter()

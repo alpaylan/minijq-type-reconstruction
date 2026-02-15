@@ -187,7 +187,11 @@ fn eval_binary(
             let left = eval_inner(lhs, current, root)?;
             let right = eval_inner(rhs, current, root)?;
             let eq = left == right;
-            Ok(Value::Bool(if matches!(op, BinaryOp::Eq) { eq } else { !eq }))
+            Ok(Value::Bool(if matches!(op, BinaryOp::Eq) {
+                eq
+            } else {
+                !eq
+            }))
         }
         BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
             let left = eval_inner(lhs, current, root)?;
@@ -299,7 +303,12 @@ fn eval_builtin(
         },
         Builtin::First => match argument {
             Value::Array(items) if !items.is_empty() => Ok(items[0].clone()),
-            Value::Array(_) => Err(type_error("first", op.expected_input_type(), argument, root)),
+            Value::Array(_) => Err(type_error(
+                "first",
+                op.expected_input_type(),
+                argument,
+                root,
+            )),
             other => Err(type_error("first", op.expected_input_type(), other, root)),
         },
         Builtin::Last => match argument {
@@ -373,7 +382,12 @@ fn eval_builtin(
                 })?;
                 Ok(Value::Number(number))
             }
-            other => Err(type_error("tonumber", op.expected_input_type(), other, root)),
+            other => Err(type_error(
+                "tonumber",
+                op.expected_input_type(),
+                other,
+                root,
+            )),
         },
         Builtin::Abs => {
             let n = argument
@@ -454,7 +468,7 @@ fn eval_builtin(
                                     ]),
                                     other,
                                     root,
-                                ))
+                                ));
                             }
                         };
                         parts.push(text);
@@ -463,7 +477,12 @@ fn eval_builtin(
                 }
                 other => Err(type_error("join", Type::String, other, root)),
             },
-            other => Err(type_error("join", Type::Array(Box::new(Type::String)), other, root)),
+            other => Err(type_error(
+                "join",
+                Type::Array(Box::new(Type::String)),
+                other,
+                root,
+            )),
         },
         Builtin::Map | Builtin::Select => unreachable!("handled before eval_builtin"),
     }
@@ -471,7 +490,12 @@ fn eval_builtin(
 
 fn eval_add_builtin(argument: &Value, root: &Value) -> Result<Value, RuntimeTypeError> {
     let Value::Array(items) = argument else {
-        return Err(type_error("add", Type::Array(Box::new(Type::Any)), argument, root));
+        return Err(type_error(
+            "add",
+            Type::Array(Box::new(Type::Any)),
+            argument,
+            root,
+        ));
     };
 
     if items.is_empty() {
@@ -510,7 +534,12 @@ fn eval_add_builtin(argument: &Value, root: &Value) -> Result<Value, RuntimeType
             let mut out = Vec::new();
             for item in items {
                 let Value::Array(arr) = item else {
-                    return Err(type_error("add", Type::Array(Box::new(Type::Any)), item, root));
+                    return Err(type_error(
+                        "add",
+                        Type::Array(Box::new(Type::Any)),
+                        item,
+                        root,
+                    ));
                 };
                 out.extend(arr.clone());
             }
@@ -554,7 +583,12 @@ fn eval_min_max_builtin(
     find_min: bool,
 ) -> Result<Value, RuntimeTypeError> {
     let Value::Array(items) = argument else {
-        return Err(type_error(op, Type::Array(Box::new(Type::Any)), argument, root));
+        return Err(type_error(
+            op,
+            Type::Array(Box::new(Type::Any)),
+            argument,
+            root,
+        ));
     };
     if items.is_empty() {
         return Err(type_error(
@@ -648,9 +682,11 @@ fn key_to_index(value: &Value) -> Option<usize> {
 fn json_contains(container: &Value, needle: &Value) -> bool {
     match (container, needle) {
         (Value::String(haystack), Value::String(sub)) => haystack.contains(sub),
-        (Value::Array(haystack), Value::Array(items)) => items
-            .iter()
-            .all(|needle_item| haystack.iter().any(|hay_item| json_contains(hay_item, needle_item))),
+        (Value::Array(haystack), Value::Array(items)) => items.iter().all(|needle_item| {
+            haystack
+                .iter()
+                .any(|hay_item| json_contains(hay_item, needle_item))
+        }),
         (Value::Object(haystack), Value::Object(items)) => items.iter().all(|(k, needle_value)| {
             haystack
                 .get(k)
@@ -660,7 +696,11 @@ fn json_contains(container: &Value, needle: &Value) -> bool {
     }
 }
 
-fn eval_map_builtin(mapper: &Expr, current: &Value, root: &Value) -> Result<Value, RuntimeTypeError> {
+fn eval_map_builtin(
+    mapper: &Expr,
+    current: &Value,
+    root: &Value,
+) -> Result<Value, RuntimeTypeError> {
     let Value::Array(items) = current else {
         return Err(type_error(
             "map",
@@ -741,8 +781,8 @@ fn explicit_error(argument: &Value, root: &Value) -> RuntimeTypeError {
 mod tests {
     use super::eval;
     use crate::minijq::ast::Expr;
-    use crate::minijq::typing::Builtin;
     use crate::minijq::types::Type;
+    use crate::minijq::typing::Builtin;
     use serde_json::json;
 
     #[test]
@@ -776,7 +816,11 @@ mod tests {
 
     #[test]
     fn if_else_uses_truthiness() {
-        let expr = Expr::if_else(Expr::identity(), Expr::literal(json!(1)), Expr::literal(json!(0)));
+        let expr = Expr::if_else(
+            Expr::identity(),
+            Expr::literal(json!(1)),
+            Expr::literal(json!(0)),
+        );
         assert_eq!(eval(&expr, &json!(false)).expect("pass"), json!(0));
         assert_eq!(eval(&expr, &json!("x")).expect("pass"), json!(1));
     }
@@ -892,7 +936,10 @@ mod tests {
 
     #[test]
     fn lookup_reads_dynamic_object_key() {
-        let expr = Expr::lookup(Expr::field(Expr::identity(), "data"), Expr::field(Expr::identity(), "key"));
+        let expr = Expr::lookup(
+            Expr::field(Expr::identity(), "data"),
+            Expr::field(Expr::identity(), "key"),
+        );
         let out = eval(&expr, &json!({"data": {"x": 7}, "key": "x"})).expect("pass");
         assert_eq!(out, json!(7));
     }
@@ -965,7 +1012,10 @@ mod tests {
         let floor = Expr::builtin(Builtin::Floor, Expr::identity());
         let ceil = Expr::builtin(Builtin::Ceil, Expr::identity());
 
-        assert_eq!(eval(&tostring, &json!({"a": 1})).expect("pass"), json!("{\"a\":1}"));
+        assert_eq!(
+            eval(&tostring, &json!({"a": 1})).expect("pass"),
+            json!("{\"a\":1}")
+        );
         assert_eq!(eval(&abs, &json!(-3.7)).expect("pass"), json!(3.7));
         assert_eq!(eval(&floor, &json!(3.7)).expect("pass"), json!(3.0));
         assert_eq!(eval(&ceil, &json!(3.1)).expect("pass"), json!(4.0));
@@ -976,7 +1026,10 @@ mod tests {
         let add = Expr::builtin(Builtin::Add, Expr::identity());
         assert_eq!(eval(&add, &json!([1, 2, 3])).expect("pass"), json!(6.0));
         assert_eq!(eval(&add, &json!(["a", "b"])).expect("pass"), json!("ab"));
-        assert_eq!(eval(&add, &json!([[1], [2, 3]])).expect("pass"), json!([1, 2, 3]));
+        assert_eq!(
+            eval(&add, &json!([[1], [2, 3]])).expect("pass"),
+            json!([1, 2, 3])
+        );
         assert_eq!(
             eval(&add, &json!([{"a": 1}, {"b": 2, "a": 3}])).expect("pass"),
             json!({"a": 3, "b": 2})
@@ -1013,10 +1066,7 @@ mod tests {
 
     #[test]
     fn try_catch_recovers_from_errors() {
-        let expr = Expr::try_catch(
-            Expr::field(Expr::identity(), "x"),
-            Expr::literal(json!(0)),
-        );
+        let expr = Expr::try_catch(Expr::field(Expr::identity(), "x"), Expr::literal(json!(0)));
         assert_eq!(eval(&expr, &json!(10)).expect("pass"), json!(0));
         assert_eq!(eval(&expr, &json!({"x": 7})).expect("pass"), json!(7));
     }
