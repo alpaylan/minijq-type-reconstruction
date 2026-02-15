@@ -1,0 +1,16 @@
+Validation target:
+  Filter: map(.id + 1)
+  Baseline static scheme: Array<Object{id: Number, ..R0}> -> Array<Number>
+  Runtime-informed scheme: Array<Object{id: Number, ..Any}> -> Array<Number>
+  Reconstructed input domain: Array<Object{id: Number, ..Any}>
+  Converged: true
+  Input JSON: [{"id":1},{"id":"x"}]
+Evaluation: runtime type error
+  +: expected Number, got String<"x"> (input Tuple<Object{id: Number<1>}, Object{id: String<"x">}>)
+Scheme validator:
+  Reconstructed input domain: Array<Object{id: Number, ..Any}>
+  Actual input type: Tuple<Object{id: Number<1>}, Object{id: String<"x">}>
+  Accepted by reconstructed domain: false
+  Runtime error: +: expected Number, got String<"x"> (input Tuple<Object{id: Number<1>}, Object{id: String<"x">}>)
+  Validation issues:
+    - $[1]["id"]: expected Number, got String<"x">

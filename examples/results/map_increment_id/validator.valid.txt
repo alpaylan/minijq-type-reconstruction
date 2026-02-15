@@ -1,0 +1,14 @@
+Validation target:
+  Filter: map(.id + 1)
+  Baseline static scheme: Array<Object{id: Number, ..R0}> -> Array<Number>
+  Runtime-informed scheme: Array<Object{id: Number, ..Any}> -> Array<Number>
+  Reconstructed input domain: Array<Object{id: Number, ..Any}>
+  Converged: true
+  Input JSON: [{"id":1},{"id":4},{"id":9}]
+Evaluation: success
+  Output: [2.0,5.0,10.0]
+Scheme validator:
+  Reconstructed input domain: Array<Object{id: Number, ..Any}>
+  Actual input type: Tuple<Object{id: Number<1>}, Object{id: Number<4>}, Object{id: Number<9>}>
+  Accepted by reconstructed domain: true
+  Validation issues: none

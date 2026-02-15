@@ -1,0 +1,14 @@
+Validation target:
+  Filter: .metrics.a + .metrics.b
+  Baseline static scheme: Object{metrics: Object{a: Number, b: Number, ..R1}, ..R0} -> Number
+  Runtime-informed scheme: Object{metrics: Object{a: Number, b: Number, ..Any}, ..Any} -> Number
+  Reconstructed input domain: Object{metrics: Object{a: Number, b: Number, ..Any}, ..Any}
+  Converged: true
+  Input JSON: {"metrics":{"a":3,"b":5}}
+Evaluation: success
+  Output: 8.0
+Scheme validator:
+  Reconstructed input domain: Object{metrics: Object{a: Number, b: Number, ..Any}, ..Any}
+  Actual input type: Object{metrics: Object{a: Number<3>, b: Number<5>}}
+  Accepted by reconstructed domain: true
+  Validation issues: none

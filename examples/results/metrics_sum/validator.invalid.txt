@@ -1,0 +1,16 @@
+Validation target:
+  Filter: .metrics.a + .metrics.b
+  Baseline static scheme: Object{metrics: Object{a: Number, b: Number, ..R1}, ..R0} -> Number
+  Runtime-informed scheme: Object{metrics: Object{a: Number, b: Number, ..Any}, ..Any} -> Number
+  Reconstructed input domain: Object{metrics: Object{a: Number, b: Number, ..Any}, ..Any}
+  Converged: true
+  Input JSON: {"metrics":{"a":"oops","b":2}}
+Evaluation: runtime type error
+  +: expected Number, got String<"oops"> (input Object{metrics: Object{a: String<"oops">, b: Number<2>}})
+Scheme validator:
+  Reconstructed input domain: Object{metrics: Object{a: Number, b: Number, ..Any}, ..Any}
+  Actual input type: Object{metrics: Object{a: String<"oops">, b: Number<2>}}
+  Accepted by reconstructed domain: false
+  Runtime error: +: expected Number, got String<"oops"> (input Object{metrics: Object{a: String<"oops">, b: Number<2>}})
+  Validation issues:
+    - $["metrics"]["a"]: expected Number, got String<"oops">

@@ -8,6 +8,7 @@ pub mod reconstruct;
 pub mod type_cache;
 pub mod types;
 pub mod typing;
+pub mod validator;
 
 pub use ast::{BinaryOp, Expr, UnaryOp};
 pub use defs::{DefParseError, Definition, parse_definitions};
@@ -25,4 +26,8 @@ pub use types::{ObjectShape, RowTail, Type};
 pub use typing::{
     Builtin, PredicateRefinement, TypeScheme, infer_expr_scheme, infer_expr_type,
     infer_predicate_refinement,
+};
+pub use validator::{
+    SchemeValidationReport, ValidationIssue, ValidationIssueKind,
+    validate_input_against_reconstruction, validate_value_against_type,
 };

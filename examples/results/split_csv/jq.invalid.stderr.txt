@@ -1,0 +1,1 @@
+jq: error (at examples/inputs/split_csv/invalid.json:1): split input and separator must be strings

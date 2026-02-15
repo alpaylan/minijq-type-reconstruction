@@ -1,0 +1,14 @@
+Validation target:
+  Filter: if . == true or . == false then 1 else error end
+  Baseline static scheme: T0 -> Number<1>
+  Runtime-informed scheme: Bool -> Number<1>
+  Reconstructed input domain: Bool
+  Converged: true
+  Input JSON: true
+Evaluation: success
+  Output: 1
+Scheme validator:
+  Reconstructed input domain: Bool
+  Actual input type: Bool<true>
+  Accepted by reconstructed domain: true
+  Validation issues: none

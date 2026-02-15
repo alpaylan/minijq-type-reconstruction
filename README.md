@@ -72,23 +72,23 @@ Status legend:
 - `Partial`: implemented but semantics differ from jq in notable cases.
 - `Missing`: not implemented yet.
 
-| Area | Status | Notes |
-| --- | --- | --- |
-| Core expressions (`.`, literals, `|`, `if ... then ... else ... end`) | `Supported` | Includes your `if . == true or . == false then 1 else error end` pattern. |
-| Error handling (`error`, `error("msg")`, `try ... catch ...`) | `Supported` | Explicit errors are catchable and tested against jq. |
-| Optional postfix (`expr?`) | `Supported` | Suppresses runtime errors into `null`. |
-| Field/index/lookup (`.k`, `.[n]`, `.[expr]`) | `Partial` | Non-negative indexing and dynamic lookup are supported; negative indices and slices are not. |
-| Comparisons and boolean ops (`==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `//`) | `Partial` | Mostly aligned; still needs broader parity validation on edge cases. |
-| Binary arithmetic operators (`+`, `-`, `*`, `/`) | `Partial` | Currently numeric-only for binary operators; jq overloads (string concat/repeat, object merge, array diff/concat, string split division) are not all implemented yet. |
-| Builtins currently listed in README | `Supported` | `length`, `map`, `select`, `contains`, `split`, `join`, `tonumber`, etc. |
-| Streaming model (multi-output filters) | `Missing` | Current evaluator returns a single JSON value, while jq is stream-based. |
-| Iterator syntax (`.[]`) | `Missing` | Not parsed/evaluated in jq stream semantics. |
-| Slice syntax (`.[a:b]`, `.[a:]`, `.[:b]`) | `Missing` | Not parsed/evaluated. |
-| Function definitions (`def f: ...;`) and calls | `Missing` | No `def`, `;`, or user-defined function environment yet. |
-| Variable bindings (`as $x`, `$x`) | `Missing` | No binder/variable syntax support yet. |
-| Structural control combinators (`reduce`, `foreach`, `until`) | `Missing` | Not implemented in parser/evaluator/type inference. |
-| Broader jq builtin surface (`range`, `del`, `to_entries`, `map_values`, `group_by`, regex builtins, etc.) | `Missing` | Only a focused subset is currently implemented. |
-| Modules/imports | `Missing` | No module system. |
+| Area                                                                                                      | Status                             | Notes                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core expressions (`.`, literals, `                                                                        | `, `if ... then ... else ... end`) | `Supported`                                                                                                                                                           | Includes your `if . == true or . == false then 1 else error end` pattern. |
+| Error handling (`error`, `error("msg")`, `try ... catch ...`)                                             | `Supported`                        | Explicit errors are catchable and tested against jq.                                                                                                                  |
+| Optional postfix (`expr?`)                                                                                | `Supported`                        | Suppresses runtime errors into `null`.                                                                                                                                |
+| Field/index/lookup (`.k`, `.[n]`, `.[expr]`)                                                              | `Partial`                          | Non-negative indexing and dynamic lookup are supported; negative indices and slices are not.                                                                          |
+| Comparisons and boolean ops (`==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `//`)                         | `Partial`                          | Mostly aligned; still needs broader parity validation on edge cases.                                                                                                  |
+| Binary arithmetic operators (`+`, `-`, `*`, `/`)                                                          | `Partial`                          | Currently numeric-only for binary operators; jq overloads (string concat/repeat, object merge, array diff/concat, string split division) are not all implemented yet. |
+| Builtins currently listed in README                                                                       | `Supported`                        | `length`, `map`, `select`, `contains`, `split`, `join`, `tonumber`, etc.                                                                                              |
+| Streaming model (multi-output filters)                                                                    | `Missing`                          | Current evaluator returns a single JSON value, while jq is stream-based.                                                                                              |
+| Iterator syntax (`.[]`)                                                                                   | `Missing`                          | Not parsed/evaluated in jq stream semantics.                                                                                                                          |
+| Slice syntax (`.[a:b]`, `.[a:]`, `.[:b]`)                                                                 | `Missing`                          | Not parsed/evaluated.                                                                                                                                                 |
+| Function definitions (`def f: ...;`) and calls                                                            | `Missing`                          | No `def`, `;`, or user-defined function environment yet.                                                                                                              |
+| Variable bindings (`as $x`, `$x`)                                                                         | `Missing`                          | No binder/variable syntax support yet.                                                                                                                                |
+| Structural control combinators (`reduce`, `foreach`, `until`)                                             | `Missing`                          | Not implemented in parser/evaluator/type inference.                                                                                                                   |
+| Broader jq builtin surface (`range`, `del`, `to_entries`, `map_values`, `group_by`, regex builtins, etc.) | `Missing`                          | Only a focused subset is currently implemented.                                                                                                                       |
+| Modules/imports                                                                                           | `Missing`                          | No module system.                                                                                                                                                     |
 
 ### Recommended parity order
 
@@ -128,6 +128,55 @@ cargo run -- --analyze-file defs.mjq
 ```
 
 `defs.mjqi` stores runtime-informed schemes from reconstructed valid input domains for each analyzable `def`, and appends comments for unsupported definitions.
+
+Validate a concrete JSON input against a filter using reconstructed input domains:
+
+```bash
+cargo run -- --validate-filter '.metrics.a + .metrics.b' \
+  --validate-input '{"metrics":{"a":"oops","b":2}}'
+```
+
+You can also pass JSON via file:
+
+```bash
+cargo run -- --validate-filter 'map(.id + 1)' \
+  --validate-input-file ./bad-input.json
+```
+
+The validator runs reconstruction for the target filter, executes the filter, and when runtime type errors occur prints:
+
+- reconstructed input domain
+- actual input type
+- whether the input is accepted by reconstructed domain
+- path-aware issues (e.g. `$["metrics"]["a"]: expected Number, got String<"oops">`)
+
+### Validator Scenarios
+
+Examples currently covered by tests:
+
+1. Filter: `.metrics.a + .metrics.b`
+   Bad input: `{"metrics":{"a":"oops","b":2}}`
+   Diagnosis: `$["metrics"]["a"]` must be `Number`.
+
+2. Filter: `map(.id + 1)`
+   Bad input: `[{"id":1},{"id":"x"}]`
+   Diagnosis: `$[1]["id"]` must be `Number`.
+
+3. Filter: `.[0]`
+   Bad input: `[]`
+   Diagnosis: root input must be a non-empty array.
+
+## Curated Examples
+
+For a ready-to-browse set of filters, inputs, jq outputs, and validator diagnostics, see:
+
+- `examples/README.md`
+
+To regenerate all example result snapshots:
+
+```bash
+bash examples/generate_results.sh
+```
 
 Run jq compatibility tests only:
 
@@ -198,7 +247,7 @@ Generated from current `cargo run` output.
 | `sum_values_add`           | `Object{values: Array<A2>, ..R0} -> Any`                                               | `Object{values: Array<Any>, ..Any}`                                             | `true`    |
 | `max_score_try`            | `Object{scores: NonEmptyArray<X2>, ..R0} -> X2 \| Null`                                | `Object{scores: NonEmptyArray<Any>, ..Any}`                                     | `true`    |
 | `csv_split`                | `Object{csv: String, ..R0} -> Array<String>`                                           | `Object{csv: String, ..Any}`                                                    | `true`    |
-| `tags_join`                | `Object{tags: Array<Bool \| Null \| Number \| String>, ..R0} -> String`               | `Object{tags: Array<Bool \| Null \| Number \| String>, ..Any}`                 | `true`    |
+| `tags_join`                | `Object{tags: Array<Bool \| Null \| Number \| String>, ..R0} -> String`                | `Object{tags: Array<Bool \| Null \| Number \| String>, ..Any}`                  | `true`    |
 | `sorted_top_score`         | `Object{scores: Array<S3>, ..R0} -> I5 \| Null`                                        | `Object{scores: Array<Any>, ..Any}`                                             | `true`    |
 | `has_first_item`           | `NonEmptyArray<I1> -> I1 \| Null`                                                      | `NonEmptyArray<Any>`                                                            | `true`    |
 | `floating_threshold`       | `Object{latency: F1, ..R0} -> Bool`                                                    | `Object{latency: Any, ..Any}`                                                   | `true`    |

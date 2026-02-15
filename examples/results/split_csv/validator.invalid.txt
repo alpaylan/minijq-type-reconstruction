@@ -1,0 +1,16 @@
+Validation target:
+  Filter: split(",")
+  Baseline static scheme: String -> Array<String>
+  Runtime-informed scheme: String -> Array<String>
+  Reconstructed input domain: String
+  Converged: true
+  Input JSON: 42
+Evaluation: runtime type error
+  split: expected String, got Number<42> (input Number<42>)
+Scheme validator:
+  Reconstructed input domain: String
+  Actual input type: Number<42>
+  Accepted by reconstructed domain: false
+  Runtime error: split: expected String, got Number<42> (input Number<42>)
+  Validation issues:
+    - $: expected String, got Number<42>

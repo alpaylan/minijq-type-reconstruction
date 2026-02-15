@@ -1,0 +1,14 @@
+Validation target:
+  Filter: split(",")
+  Baseline static scheme: String -> Array<String>
+  Runtime-informed scheme: String -> Array<String>
+  Reconstructed input domain: String
+  Converged: true
+  Input JSON: "alpha,beta,gamma"
+Evaluation: success
+  Output: ["alpha","beta","gamma"]
+Scheme validator:
+  Reconstructed input domain: String
+  Actual input type: String<"alpha,beta,gamma">
+  Accepted by reconstructed domain: true
+  Validation issues: none

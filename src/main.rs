@@ -1,5 +1,6 @@
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write;
@@ -8,9 +9,9 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use typereconstruction::minijq::{
     CachedReconstruction, Expr, ReconstructionConfig, ReconstructionResult, Type, TypeCache,
-    TypeScheme, all_examples, infer_expr_scheme, infer_expr_type, infer_predicate_refinement,
+    TypeScheme, all_examples, eval, infer_expr_scheme, infer_expr_type, infer_predicate_refinement,
     parse_definitions, parse_expr, reconstruct_input_type_unbiased_with_scheme,
-    reconstruct_input_type_with_scheme,
+    reconstruct_input_type_with_scheme, validate_input_against_reconstruction,
 };
 
 const DEFAULT_TYPE_CACHE_PATH: &str = ".minijq.typecache.mjqi";
@@ -21,6 +22,9 @@ struct CliOptions {
     unbiased: bool,
     only_program: Option<String>,
     analyze_file: Option<String>,
+    validate_filter: Option<String>,
+    validate_input_json: Option<String>,
+    validate_input_file: Option<String>,
     type_cache_path: Option<String>,
     refresh_type_cache: bool,
 }
@@ -32,6 +36,9 @@ impl Default for CliOptions {
             unbiased: false,
             only_program: None,
             analyze_file: None,
+            validate_filter: None,
+            validate_input_json: None,
+            validate_input_file: None,
             type_cache_path: Some(DEFAULT_TYPE_CACHE_PATH.to_string()),
             refresh_type_cache: false,
         }
@@ -64,6 +71,27 @@ fn parse_cli_options() -> CliOptions {
                 };
                 options.analyze_file = Some(path);
             }
+            "--validate-filter" => {
+                let Some(filter) = args.next() else {
+                    eprintln!("missing value for --validate-filter");
+                    std::process::exit(2);
+                };
+                options.validate_filter = Some(filter);
+            }
+            "--validate-input" => {
+                let Some(input) = args.next() else {
+                    eprintln!("missing value for --validate-input");
+                    std::process::exit(2);
+                };
+                options.validate_input_json = Some(input);
+            }
+            "--validate-input-file" => {
+                let Some(path) = args.next() else {
+                    eprintln!("missing value for --validate-input-file");
+                    std::process::exit(2);
+                };
+                options.validate_input_file = Some(path);
+            }
             "--type-cache" => {
                 let Some(path) = args.next() else {
                     eprintln!("missing value for --type-cache");
@@ -80,7 +108,7 @@ fn parse_cli_options() -> CliOptions {
             other => {
                 eprintln!("unknown argument: {other}");
                 eprintln!(
-                    "usage: cargo run -- [--trace] [--unbiased] [--program NAME] [--analyze-file PATH] [--type-cache PATH | --no-type-cache] [--refresh-type-cache]"
+                    "usage: cargo run -- [--trace] [--unbiased] [--program NAME] [--analyze-file PATH] [--validate-filter FILTER --validate-input JSON|--validate-input-file PATH] [--type-cache PATH | --no-type-cache] [--refresh-type-cache]"
                 );
                 std::process::exit(2);
             }
@@ -89,6 +117,23 @@ fn parse_cli_options() -> CliOptions {
 
     if options.analyze_file.is_some() && options.only_program.is_some() {
         eprintln!("--program cannot be combined with --analyze-file");
+        std::process::exit(2);
+    }
+    if options.validate_filter.is_some() {
+        if options.only_program.is_some() || options.analyze_file.is_some() {
+            eprintln!("--validate-filter cannot be combined with --program or --analyze-file");
+            std::process::exit(2);
+        }
+        if options.validate_input_json.is_some() && options.validate_input_file.is_some() {
+            eprintln!("use only one of --validate-input and --validate-input-file");
+            std::process::exit(2);
+        }
+        if options.validate_input_json.is_none() && options.validate_input_file.is_none() {
+            eprintln!("--validate-filter requires --validate-input or --validate-input-file");
+            std::process::exit(2);
+        }
+    } else if options.validate_input_json.is_some() || options.validate_input_file.is_some() {
+        eprintln!("--validate-input/--validate-input-file requires --validate-filter");
         std::process::exit(2);
     }
 
@@ -648,9 +693,174 @@ fn run_examples(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
     0
 }
 
+fn read_validation_input(options: &CliOptions) -> Result<Value, String> {
+    if let Some(raw) = options.validate_input_json.as_ref() {
+        return serde_json::from_str(raw)
+            .map_err(|err| format!("invalid JSON provided to --validate-input: {err}"));
+    }
+    if let Some(path) = options.validate_input_file.as_ref() {
+        let body = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read `{path}` for --validate-input-file: {err}"))?;
+        return serde_json::from_str(&body)
+            .map_err(|err| format!("invalid JSON in `{path}`: {err}"));
+    }
+    Err("missing validation input".to_string())
+}
+
+fn run_validation(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
+    let Some(filter) = options.validate_filter.as_ref() else {
+        eprintln!("internal error: missing --validate-filter");
+        return 2;
+    };
+
+    let expr = match parse_expr(filter) {
+        Ok(expr) => expr,
+        Err(err) => {
+            eprintln!("failed to parse filter `{filter}`: {err}");
+            return 2;
+        }
+    };
+    let input = match read_validation_input(options) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("{err}");
+            return 2;
+        }
+    };
+
+    let baseline_scheme = infer_expr_scheme(&expr);
+    let cache_key = format!("validate::{filter}");
+    let mut type_cache = options
+        .type_cache_path
+        .as_ref()
+        .map(|path| load_cache(Path::new(path)));
+
+    let cached_analysis = if options.refresh_type_cache {
+        None
+    } else {
+        type_cache
+            .as_ref()
+            .and_then(|cache| cache.lookup(&cache_key, filter))
+    };
+
+    let result = if let Some(cached) = cached_analysis {
+        let inferred_scheme =
+            runtime_informed_scheme(&cached.final_input_type, &cached.output_type);
+        ReconstructionResult {
+            inferred_scheme,
+            final_input_type: cached.final_input_type,
+            subset_types: cached.subset_types,
+            converged: cached.converged,
+            traces: Vec::new(),
+        }
+    } else {
+        let mut rng = StdRng::seed_from_u64(95_001);
+        let mut reconstructed = if options.unbiased {
+            reconstruct_input_type_unbiased_with_scheme(
+                &expr,
+                baseline_scheme.clone(),
+                config,
+                &mut rng,
+            )
+        } else {
+            reconstruct_input_type_with_scheme(&expr, baseline_scheme.clone(), config, &mut rng)
+        };
+        let output_type = infer_expr_type(&expr, &reconstructed.final_input_type).normalize();
+        reconstructed.inferred_scheme =
+            runtime_informed_scheme(&reconstructed.final_input_type, &output_type);
+
+        if let Some(cache) = type_cache.as_mut() {
+            cache.insert(
+                &cache_key,
+                filter,
+                CachedReconstruction {
+                    final_input_type: reconstructed.final_input_type.clone(),
+                    output_type,
+                    subset_types: reconstructed.subset_types.clone(),
+                    converged: reconstructed.converged,
+                },
+            );
+            if let Some(path) = options.type_cache_path.as_ref() {
+                if let Err(err) = cache.save_if_dirty() {
+                    eprintln!("warning: failed to save type cache `{path}`: {err}");
+                }
+            }
+        }
+        reconstructed
+    };
+
+    println!("Validation target:");
+    println!("  Filter: {filter}");
+    println!(
+        "  Baseline static scheme: {} -> {}",
+        baseline_scheme.input, baseline_scheme.output
+    );
+    println!(
+        "  Runtime-informed scheme: {} -> {}",
+        result.inferred_scheme.input, result.inferred_scheme.output
+    );
+    if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type) {
+        if refinement.has_information() {
+            println!("  Predicate refinement: {}", refinement.pretty());
+        }
+    }
+    println!(
+        "  Reconstructed input domain: {}",
+        result.annotated_input_type()
+    );
+    println!("  Converged: {}", result.converged);
+    println!("  Input JSON: {}", input);
+
+    match eval(&expr, &input) {
+        Ok(output) => {
+            println!("Evaluation: success");
+            println!("  Output: {}", output);
+            let report = validate_input_against_reconstruction(
+                &input,
+                &result.final_input_type,
+                &result.subset_types,
+                None,
+            );
+            println!("Scheme validator:");
+            for line in report.pretty().lines() {
+                println!("  {line}");
+            }
+            0
+        }
+        Err(err) => {
+            println!("Evaluation: runtime type error");
+            println!("  {}", err);
+            let report = validate_input_against_reconstruction(
+                &input,
+                &result.final_input_type,
+                &result.subset_types,
+                Some(&err),
+            );
+            println!("Scheme validator:");
+            for line in report.pretty().lines() {
+                println!("  {line}");
+            }
+            if report.accepted_by_reconstruction && report.subset_hits.is_empty() {
+                println!(
+                    "  note: input fits current reconstructed domain; this indicates missing constraints in reconstruction."
+                );
+            }
+            1
+        }
+    }
+}
+
 fn main() {
     let options = parse_cli_options();
     let config = ReconstructionConfig::strong();
+
+    if options.validate_filter.is_some() {
+        let code = run_validation(&options, &config);
+        if code != 0 {
+            std::process::exit(code);
+        }
+        return;
+    }
 
     if let Some(path) = &options.analyze_file {
         let code = analyze_definition_file(Path::new(path), &options, &config);

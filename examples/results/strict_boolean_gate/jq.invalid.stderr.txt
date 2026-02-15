@@ -1,0 +1,1 @@
+jq: error (at examples/inputs/strict_boolean_gate/invalid.json:1) (not a string): null

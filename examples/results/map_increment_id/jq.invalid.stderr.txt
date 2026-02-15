@@ -1,0 +1,1 @@
+jq: error (at examples/inputs/map_increment_id/invalid.json:1): string ("x") and number (1) cannot be added
