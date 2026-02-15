@@ -8,8 +8,9 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use typereconstruction::minijq::{
     CachedReconstruction, Expr, ReconstructionConfig, ReconstructionResult, Type, TypeCache,
-    TypeScheme, all_examples, infer_expr_scheme, infer_expr_type, parse_definitions, parse_expr,
-    reconstruct_input_type_unbiased_with_scheme, reconstruct_input_type_with_scheme,
+    TypeScheme, all_examples, infer_expr_scheme, infer_expr_type, infer_predicate_refinement,
+    parse_definitions, parse_expr, reconstruct_input_type_unbiased_with_scheme,
+    reconstruct_input_type_with_scheme,
 };
 
 const DEFAULT_TYPE_CACHE_PATH: &str = ".minijq.typecache.mjqi";
@@ -393,6 +394,12 @@ fn analyze_definition_file(
             "  Scheme: {} -> {}",
             result.inferred_scheme.input, result.inferred_scheme.output
         );
+        if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type) {
+            if refinement.has_information() {
+                let note = refinement.pretty();
+                println!("  Predicate refinement: {}", note);
+            }
+        }
         println!("  Final input type: {}", result.annotated_input_type());
         println!("  Converged: {}", result.converged);
         if options.trace {
@@ -425,13 +432,15 @@ fn analyze_definition_file(
             }
         };
         let _ = writeln!(file);
-        let _ = writeln!(
-            file,
-            "# unsupported definitions (not analyzable by current minijq subset):"
-        );
-        for item in &unsupported {
-            let reason = item.reason.replace('\n', " ");
-            let _ = writeln!(file, "# - {} [line {}]: {}", item.key, item.line, reason);
+        if !unsupported.is_empty() {
+            let _ = writeln!(
+                file,
+                "# unsupported definitions (not analyzable by current minijq subset):"
+            );
+            for item in &unsupported {
+                let reason = item.reason.replace('\n', " ");
+                let _ = writeln!(file, "# - {} [line {}]: {}", item.key, item.line, reason);
+            }
         }
         if let Err(err) = fs::write(&output_path, file) {
             eprintln!(
@@ -560,6 +569,13 @@ fn run_examples(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
             "  Scheme: {} -> {}",
             result.inferred_scheme.input, result.inferred_scheme.output
         );
+        if let Some(refinement) =
+            infer_predicate_refinement(&example.expr, &result.final_input_type)
+        {
+            if refinement.has_information() {
+                println!("  Predicate refinement: {}", refinement.pretty());
+            }
+        }
         println!("  Final input type: {}", result.annotated_input_type());
         if !result.subset_types.is_empty() {
             let subsets = result

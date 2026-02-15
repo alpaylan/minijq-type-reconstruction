@@ -22,4 +22,7 @@ pub use reconstruct::{
 };
 pub use type_cache::{CacheLookupResult, CachedReconstruction, TypeCache};
 pub use types::{ObjectShape, RowTail, Type};
-pub use typing::{Builtin, TypeScheme, infer_expr_scheme, infer_expr_type};
+pub use typing::{
+    Builtin, PredicateRefinement, TypeScheme, infer_expr_scheme, infer_expr_type,
+    infer_predicate_refinement,
+};

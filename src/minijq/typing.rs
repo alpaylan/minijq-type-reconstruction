@@ -240,6 +240,125 @@ impl TypeScheme {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PredicateRefinement {
+    pub input_domain: Type,
+    pub true_input: Type,
+    pub false_input: Type,
+    pub unknown_input: Type,
+}
+
+impl PredicateRefinement {
+    pub fn has_information(&self) -> bool {
+        !self.true_input.is_never() || !self.false_input.is_never()
+    }
+
+    pub fn is_total(&self) -> bool {
+        self.unknown_input.is_never()
+    }
+
+    pub fn pretty(&self) -> String {
+        let mut clauses = Vec::new();
+        if !self.true_input.is_never() {
+            clauses.push(format!("{} -> Bool<true>", self.true_input));
+        }
+        if !self.false_input.is_never() {
+            if self.is_total() {
+                let not_true = self.input_domain.subtract(&self.true_input).normalize();
+                if not_true == self.false_input && !self.true_input.is_never() {
+                    clauses.push(format!("Not<{}> -> Bool<false>", self.true_input));
+                } else {
+                    clauses.push(format!("{} -> Bool<false>", self.false_input));
+                }
+            } else {
+                clauses.push(format!("{} -> Bool<false>", self.false_input));
+            }
+        }
+        if !self.unknown_input.is_never() {
+            clauses.push(format!("{} -> Bool", self.unknown_input));
+        }
+        clauses.join(" ; ")
+    }
+}
+
+pub fn infer_predicate_refinement(expr: &Expr, input_domain: &Type) -> Option<PredicateRefinement> {
+    let output = infer_expr_type(expr, input_domain).normalize();
+    if !output.is_subtype_of(&Type::Bool) {
+        return None;
+    }
+
+    let partitions = vec![
+        Type::Null,
+        Type::BoolLiteral(true),
+        Type::BoolLiteral(false),
+        Type::Number,
+        Type::String,
+        Type::Array(Box::new(Type::Any)),
+        Type::Object(ObjectShape::open_any()),
+    ];
+
+    let mut true_inputs = Vec::new();
+    let mut false_inputs = Vec::new();
+    let mut unknown_inputs = Vec::new();
+
+    for partition in partitions {
+        let slice = input_domain.intersect(&partition).normalize();
+        if slice.is_never() {
+            continue;
+        }
+
+        let out = infer_expr_type(expr, &slice).normalize();
+        match out {
+            Type::BoolLiteral(true) => true_inputs.push(slice),
+            Type::BoolLiteral(false) => false_inputs.push(slice),
+            _ => unknown_inputs.push(slice),
+        }
+    }
+
+    let true_input = canonicalize_predicate_domain(Type::union(true_inputs));
+    let false_input = canonicalize_predicate_domain(Type::union(false_inputs));
+    let unknown_input = canonicalize_predicate_domain(Type::union(unknown_inputs));
+
+    Some(PredicateRefinement {
+        input_domain: input_domain.clone().normalize(),
+        true_input,
+        false_input,
+        unknown_input,
+    })
+}
+
+fn canonicalize_predicate_domain(ty: Type) -> Type {
+    match ty.normalize() {
+        Type::Union(items) => {
+            let mut has_true = false;
+            let mut has_false = false;
+            let mut others = Vec::new();
+
+            for item in items {
+                match item {
+                    Type::BoolLiteral(true) => has_true = true,
+                    Type::BoolLiteral(false) => has_false = true,
+                    other => others.push(other),
+                }
+            }
+
+            if has_true && has_false {
+                others.push(Type::Bool);
+            } else {
+                if has_true {
+                    others.push(Type::BoolLiteral(true));
+                }
+                if has_false {
+                    others.push(Type::BoolLiteral(false));
+                }
+            }
+
+            Type::union(others)
+        }
+        other => other,
+    }
+}
+
 pub fn infer_expr_type(expr: &Expr, input: &Type) -> Type {
     match expr {
         Expr::Identity => input.clone(),
@@ -266,8 +385,10 @@ pub fn infer_expr_type(expr: &Expr, input: &Type) -> Type {
             let pred_ty = infer_expr_type(inner, input);
             if pred_ty.is_never() || input.is_never() {
                 Type::Never
+            } else if let Some(refinement) = infer_predicate_refinement(inner, input) {
+                Type::union(vec![refinement.true_input, refinement.unknown_input]).normalize()
             } else {
-                Type::union(vec![input.clone(), Type::Null])
+                input.clone()
             }
         }
         Expr::Builtin(Builtin::Has, inner) => infer_has_type(inner, input),
@@ -375,14 +496,44 @@ fn infer_binary_type(op: BinaryOp, left: Type, right: Type) -> Type {
             }
             Type::Bool
         }
-        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => Type::Bool,
-        BinaryOp::And | BinaryOp::Or => match (&left, &right) {
-            (Type::BoolLiteral(a), Type::BoolLiteral(b)) => {
-                Type::BoolLiteral(if matches!(op, BinaryOp::And) {
-                    *a && *b
+        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
+            infer_order_comparison_type(op, &left, &right)
+        }
+        BinaryOp::And => match (&left, &right) {
+            (Type::BoolLiteral(false), _) | (_, Type::BoolLiteral(false)) => {
+                Type::BoolLiteral(false)
+            }
+            (Type::BoolLiteral(true), rhs) => {
+                if rhs.is_subtype_of(&Type::Bool) {
+                    rhs.clone()
                 } else {
-                    *a || *b
-                })
+                    Type::Bool
+                }
+            }
+            (lhs, Type::BoolLiteral(true)) => {
+                if lhs.is_subtype_of(&Type::Bool) {
+                    lhs.clone()
+                } else {
+                    Type::Bool
+                }
+            }
+            _ => Type::Bool,
+        },
+        BinaryOp::Or => match (&left, &right) {
+            (Type::BoolLiteral(true), _) | (_, Type::BoolLiteral(true)) => Type::BoolLiteral(true),
+            (Type::BoolLiteral(false), rhs) => {
+                if rhs.is_subtype_of(&Type::Bool) {
+                    rhs.clone()
+                } else {
+                    Type::Bool
+                }
+            }
+            (lhs, Type::BoolLiteral(false)) => {
+                if lhs.is_subtype_of(&Type::Bool) {
+                    lhs.clone()
+                } else {
+                    Type::Bool
+                }
             }
             _ => Type::Bool,
         },
@@ -390,6 +541,342 @@ fn infer_binary_type(op: BinaryOp, left: Type, right: Type) -> Type {
             let narrowed_left = left.subtract(&Type::Null).normalize();
             Type::union(vec![narrowed_left, right])
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ComparisonAtom {
+    Null,
+    Bool(Option<bool>),
+    Number(Option<String>),
+    String(Option<String>),
+    Array(ArrayAtom),
+    Object(ObjectAtom),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArrayAtom {
+    Any,
+    EmptyLiteral,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ObjectAtom {
+    Any,
+    EmptyLiteral,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct OutcomeSet {
+    can_true: bool,
+    can_false: bool,
+}
+
+impl OutcomeSet {
+    fn record(&mut self, value: bool) {
+        if value {
+            self.can_true = true;
+        } else {
+            self.can_false = true;
+        }
+    }
+
+    fn union_with(&mut self, other: OutcomeSet) {
+        self.can_true |= other.can_true;
+        self.can_false |= other.can_false;
+    }
+}
+
+fn infer_order_comparison_type(op: BinaryOp, left: &Type, right: &Type) -> Type {
+    let outcomes = compare_outcome_set(op, left, right);
+    match (outcomes.can_true, outcomes.can_false) {
+        (true, false) => Type::BoolLiteral(true),
+        (false, true) => Type::BoolLiteral(false),
+        (true, true) => Type::Bool,
+        (false, false) => Type::Never,
+    }
+}
+
+fn compare_outcome_set(op: BinaryOp, left: &Type, right: &Type) -> OutcomeSet {
+    let left_atoms = comparison_atoms(left);
+    let right_atoms = comparison_atoms(right);
+    let mut outcomes = OutcomeSet::default();
+
+    for left_atom in &left_atoms {
+        for right_atom in &right_atoms {
+            outcomes.union_with(compare_atom_pair(op, left_atom, right_atom));
+            if outcomes.can_true && outcomes.can_false {
+                return outcomes;
+            }
+        }
+    }
+
+    outcomes
+}
+
+fn comparison_atoms(ty: &Type) -> Vec<ComparisonAtom> {
+    fn push_unique(out: &mut Vec<ComparisonAtom>, atom: ComparisonAtom) {
+        if !out.contains(&atom) {
+            out.push(atom);
+        }
+    }
+
+    let mut out = Vec::new();
+    match ty {
+        Type::Never => {}
+        Type::Null => push_unique(&mut out, ComparisonAtom::Null),
+        Type::Bool => push_unique(&mut out, ComparisonAtom::Bool(None)),
+        Type::BoolLiteral(v) => push_unique(&mut out, ComparisonAtom::Bool(Some(*v))),
+        Type::Number => push_unique(&mut out, ComparisonAtom::Number(None)),
+        Type::NumberLiteral(text) => {
+            push_unique(&mut out, ComparisonAtom::Number(Some(text.clone())))
+        }
+        Type::String => push_unique(&mut out, ComparisonAtom::String(None)),
+        Type::StringLiteral(text) => {
+            push_unique(&mut out, ComparisonAtom::String(Some(text.clone())))
+        }
+        Type::Array(_) | Type::NonEmptyArray(_) => {
+            push_unique(&mut out, ComparisonAtom::Array(ArrayAtom::Any))
+        }
+        Type::Tuple(items) => {
+            let atom = if items.is_empty() {
+                ComparisonAtom::Array(ArrayAtom::EmptyLiteral)
+            } else {
+                ComparisonAtom::Array(ArrayAtom::Any)
+            };
+            push_unique(&mut out, atom);
+        }
+        Type::Object(shape) => {
+            let atom = if shape.fields.is_empty() && matches!(shape.tail, RowTail::Closed) {
+                ComparisonAtom::Object(ObjectAtom::EmptyLiteral)
+            } else {
+                ComparisonAtom::Object(ObjectAtom::Any)
+            };
+            push_unique(&mut out, atom);
+        }
+        Type::Any | Type::Generic(_) => {
+            push_unique(&mut out, ComparisonAtom::Null);
+            push_unique(&mut out, ComparisonAtom::Bool(None));
+            push_unique(&mut out, ComparisonAtom::Number(None));
+            push_unique(&mut out, ComparisonAtom::String(None));
+            push_unique(&mut out, ComparisonAtom::Array(ArrayAtom::Any));
+            push_unique(&mut out, ComparisonAtom::Object(ObjectAtom::Any));
+        }
+        Type::Union(items) => {
+            for item in items {
+                for atom in comparison_atoms(item) {
+                    push_unique(&mut out, atom);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn compare_atom_pair(op: BinaryOp, left: &ComparisonAtom, right: &ComparisonAtom) -> OutcomeSet {
+    let left_rank = comparison_atom_rank(left);
+    let right_rank = comparison_atom_rank(right);
+    if left_rank != right_rank {
+        return compare_known_ordering(op, left_rank.cmp(&right_rank));
+    }
+
+    match (left, right) {
+        (ComparisonAtom::Null, ComparisonAtom::Null) => {
+            compare_known_ordering(op, std::cmp::Ordering::Equal)
+        }
+        (ComparisonAtom::Bool(left_value), ComparisonAtom::Bool(right_value)) => {
+            compare_bool_domains(op, *left_value, *right_value)
+        }
+        (ComparisonAtom::Number(Some(left_text)), ComparisonAtom::Number(Some(right_text))) => {
+            let left_num = left_text.parse::<f64>().ok();
+            let right_num = right_text.parse::<f64>().ok();
+            match (left_num, right_num) {
+                (Some(l), Some(r)) => l
+                    .partial_cmp(&r)
+                    .map(|ord| compare_known_ordering(op, ord))
+                    .unwrap_or_else(|| compare_unknown_ordering()),
+                _ => compare_unknown_ordering(),
+            }
+        }
+        (ComparisonAtom::String(Some(left_text)), ComparisonAtom::String(Some(right_text))) => {
+            compare_known_ordering(op, left_text.cmp(right_text))
+        }
+        (ComparisonAtom::Array(left_atom), ComparisonAtom::Array(right_atom)) => {
+            compare_array_domains(op, *left_atom, *right_atom)
+        }
+        (ComparisonAtom::Object(left_atom), ComparisonAtom::Object(right_atom)) => {
+            compare_object_domains(op, *left_atom, *right_atom)
+        }
+        (ComparisonAtom::String(None), ComparisonAtom::String(Some(right_text))) => {
+            if right_text.is_empty() {
+                compare_string_domain_against_empty_literal(op)
+            } else {
+                compare_unknown_ordering()
+            }
+        }
+        (ComparisonAtom::String(Some(left_text)), ComparisonAtom::String(None)) => {
+            if left_text.is_empty() {
+                compare_empty_literal_against_string_domain(op)
+            } else {
+                compare_unknown_ordering()
+            }
+        }
+        (ComparisonAtom::String(None), ComparisonAtom::String(None))
+        | (ComparisonAtom::Number(_), ComparisonAtom::Number(_)) => compare_unknown_ordering(),
+        _ => compare_unknown_ordering(),
+    }
+}
+
+fn comparison_atom_rank(atom: &ComparisonAtom) -> u8 {
+    match atom {
+        ComparisonAtom::Null => 0,
+        ComparisonAtom::Bool(_) => 1,
+        ComparisonAtom::Number(_) => 2,
+        ComparisonAtom::String(_) => 3,
+        ComparisonAtom::Array(_) => 4,
+        ComparisonAtom::Object(_) => 5,
+    }
+}
+
+fn compare_known_ordering(op: BinaryOp, ord: std::cmp::Ordering) -> OutcomeSet {
+    let mut out = OutcomeSet::default();
+    let value = match op {
+        BinaryOp::Lt => ord.is_lt(),
+        BinaryOp::Lte => ord.is_le(),
+        BinaryOp::Gt => ord.is_gt(),
+        BinaryOp::Gte => ord.is_ge(),
+        _ => false,
+    };
+    out.record(value);
+    out
+}
+
+fn compare_unknown_ordering() -> OutcomeSet {
+    OutcomeSet {
+        can_true: true,
+        can_false: true,
+    }
+}
+
+fn compare_bool_domains(op: BinaryOp, left: Option<bool>, right: Option<bool>) -> OutcomeSet {
+    let left_values = left.map_or_else(|| vec![false, true], |v| vec![v]);
+    let right_values = right.map_or_else(|| vec![false, true], |v| vec![v]);
+
+    let mut out = OutcomeSet::default();
+    for lhs in left_values {
+        for rhs in &right_values {
+            out.record(match op {
+                BinaryOp::Lt => lhs < *rhs,
+                BinaryOp::Lte => lhs <= *rhs,
+                BinaryOp::Gt => lhs > *rhs,
+                BinaryOp::Gte => lhs >= *rhs,
+                _ => false,
+            });
+        }
+    }
+    out
+}
+
+fn compare_array_domains(op: BinaryOp, left: ArrayAtom, right: ArrayAtom) -> OutcomeSet {
+    match (left, right) {
+        (ArrayAtom::EmptyLiteral, ArrayAtom::EmptyLiteral) => {
+            compare_known_ordering(op, std::cmp::Ordering::Equal)
+        }
+        (ArrayAtom::Any, ArrayAtom::EmptyLiteral) => match op {
+            BinaryOp::Lt => OutcomeSet {
+                can_true: false,
+                can_false: true,
+            },
+            BinaryOp::Lte => compare_unknown_ordering(),
+            BinaryOp::Gt => compare_unknown_ordering(),
+            BinaryOp::Gte => OutcomeSet {
+                can_true: true,
+                can_false: false,
+            },
+            _ => compare_unknown_ordering(),
+        },
+        (ArrayAtom::EmptyLiteral, ArrayAtom::Any) => match op {
+            BinaryOp::Lt => compare_unknown_ordering(),
+            BinaryOp::Lte => OutcomeSet {
+                can_true: true,
+                can_false: false,
+            },
+            BinaryOp::Gt => OutcomeSet {
+                can_true: false,
+                can_false: true,
+            },
+            BinaryOp::Gte => compare_unknown_ordering(),
+            _ => compare_unknown_ordering(),
+        },
+        (ArrayAtom::Any, ArrayAtom::Any) => compare_unknown_ordering(),
+    }
+}
+
+fn compare_object_domains(op: BinaryOp, left: ObjectAtom, right: ObjectAtom) -> OutcomeSet {
+    match (left, right) {
+        (ObjectAtom::EmptyLiteral, ObjectAtom::EmptyLiteral) => {
+            compare_known_ordering(op, std::cmp::Ordering::Equal)
+        }
+        (ObjectAtom::Any, ObjectAtom::EmptyLiteral) => match op {
+            BinaryOp::Lt => OutcomeSet {
+                can_true: false,
+                can_false: true,
+            },
+            BinaryOp::Lte => compare_unknown_ordering(),
+            BinaryOp::Gt => compare_unknown_ordering(),
+            BinaryOp::Gte => OutcomeSet {
+                can_true: true,
+                can_false: false,
+            },
+            _ => compare_unknown_ordering(),
+        },
+        (ObjectAtom::EmptyLiteral, ObjectAtom::Any) => match op {
+            BinaryOp::Lt => compare_unknown_ordering(),
+            BinaryOp::Lte => OutcomeSet {
+                can_true: true,
+                can_false: false,
+            },
+            BinaryOp::Gt => OutcomeSet {
+                can_true: false,
+                can_false: true,
+            },
+            BinaryOp::Gte => compare_unknown_ordering(),
+            _ => compare_unknown_ordering(),
+        },
+        (ObjectAtom::Any, ObjectAtom::Any) => compare_unknown_ordering(),
+    }
+}
+
+fn compare_string_domain_against_empty_literal(op: BinaryOp) -> OutcomeSet {
+    match op {
+        BinaryOp::Lt => OutcomeSet {
+            can_true: false,
+            can_false: true,
+        },
+        BinaryOp::Lte => compare_unknown_ordering(),
+        BinaryOp::Gt => compare_unknown_ordering(),
+        BinaryOp::Gte => OutcomeSet {
+            can_true: true,
+            can_false: false,
+        },
+        _ => compare_unknown_ordering(),
+    }
+}
+
+fn compare_empty_literal_against_string_domain(op: BinaryOp) -> OutcomeSet {
+    match op {
+        BinaryOp::Lt => compare_unknown_ordering(),
+        BinaryOp::Lte => OutcomeSet {
+            can_true: true,
+            can_false: false,
+        },
+        BinaryOp::Gt => OutcomeSet {
+            can_true: false,
+            can_false: true,
+        },
+        BinaryOp::Gte => compare_unknown_ordering(),
+        _ => compare_unknown_ordering(),
     }
 }
 
@@ -728,7 +1215,7 @@ fn infer_poly(expr: &Expr, input: Type, ctx: &mut PolyInferCtx) -> Type {
         }
         Expr::Builtin(Builtin::Select, inner) => {
             let _pred_ty = infer_poly(inner, input.clone(), ctx);
-            Type::union(vec![input, Type::Null])
+            input
         }
         Expr::Builtin(Builtin::Has, inner) => {
             let _key_ty = infer_poly(inner, input.clone(), ctx);
@@ -1337,7 +1824,7 @@ fn collect_free_generics(ty: &Type, into: &mut BTreeSet<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Builtin, infer_expr_scheme, infer_expr_type};
+    use super::{Builtin, infer_expr_scheme, infer_expr_type, infer_predicate_refinement};
     use crate::minijq::ast::Expr;
     use crate::minijq::types::{ObjectShape, RowTail, Type};
 
@@ -1365,6 +1852,83 @@ mod tests {
     fn infer_comparison_returns_bool() {
         let expr = Expr::gt(Expr::identity(), Expr::literal(serde_json::json!(10)));
         assert_eq!(infer_expr_type(&expr, &Type::Number), Type::Bool);
+    }
+
+    #[test]
+    fn infer_isnumber_comparison_partitions() {
+        let expr = Expr::and(
+            Expr::gt(Expr::identity(), Expr::literal(serde_json::json!(true))),
+            Expr::lt(Expr::identity(), Expr::literal(serde_json::json!(""))),
+        );
+
+        assert_eq!(
+            infer_expr_type(&expr, &Type::Number),
+            Type::BoolLiteral(true)
+        );
+        assert_eq!(
+            infer_expr_type(&expr, &Type::Bool),
+            Type::BoolLiteral(false)
+        );
+        assert_eq!(
+            infer_expr_type(&expr, &Type::String),
+            Type::BoolLiteral(false)
+        );
+        assert_eq!(
+            infer_expr_type(&expr, &Type::Array(Box::new(Type::Any))),
+            Type::BoolLiteral(false)
+        );
+        assert_eq!(
+            infer_expr_type(&expr, &Type::Object(ObjectShape::open_any())),
+            Type::BoolLiteral(false)
+        );
+    }
+
+    #[test]
+    fn infer_predicate_refinement_for_isnumber() {
+        let expr = Expr::and(
+            Expr::gt(Expr::identity(), Expr::literal(serde_json::json!(true))),
+            Expr::lt(Expr::identity(), Expr::literal(serde_json::json!(""))),
+        );
+
+        let refinement = infer_predicate_refinement(&expr, &Type::Any).expect("bool predicate");
+
+        assert_eq!(refinement.true_input, Type::Number);
+        assert_eq!(
+            refinement.false_input,
+            Type::union(vec![
+                Type::Null,
+                Type::Bool,
+                Type::String,
+                Type::Array(Box::new(Type::Any)),
+                Type::Object(ObjectShape::open_any()),
+            ])
+        );
+        assert!(refinement.unknown_input.is_never());
+        assert!(refinement.is_total());
+    }
+
+    #[test]
+    fn infer_predicate_refinement_for_isboolean() {
+        let expr = Expr::or(
+            Expr::eq(Expr::identity(), Expr::literal(serde_json::json!(true))),
+            Expr::eq(Expr::identity(), Expr::literal(serde_json::json!(false))),
+        );
+
+        let refinement = infer_predicate_refinement(&expr, &Type::Any).expect("bool predicate");
+
+        assert_eq!(refinement.true_input, Type::Bool);
+        assert_eq!(
+            refinement.false_input,
+            Type::union(vec![
+                Type::Null,
+                Type::Number,
+                Type::String,
+                Type::Array(Box::new(Type::Any)),
+                Type::Object(ObjectShape::open_any()),
+            ])
+        );
+        assert!(refinement.unknown_input.is_never());
+        assert!(refinement.is_total());
     }
 
     #[test]
@@ -1406,13 +1970,35 @@ mod tests {
     }
 
     #[test]
-    fn infer_select_is_nullable_input() {
+    fn infer_select_preserves_input_domain_without_null() {
         let expr = Expr::builtin(
             Builtin::Select,
             Expr::gt(Expr::identity(), Expr::literal(serde_json::json!(0))),
         );
         let out = infer_expr_type(&expr, &Type::Number);
-        assert_eq!(out, Type::union(vec![Type::Number, Type::Null]));
+        assert_eq!(out, Type::Number);
+    }
+
+    #[test]
+    fn infer_select_isboolean_refines_to_bool() {
+        let isboolean = Expr::or(
+            Expr::eq(Expr::identity(), Expr::literal(serde_json::json!(true))),
+            Expr::eq(Expr::identity(), Expr::literal(serde_json::json!(false))),
+        );
+        let expr = Expr::builtin(Builtin::Select, isboolean);
+        let out = infer_expr_type(&expr, &Type::Any);
+        assert_eq!(out, Type::Bool);
+    }
+
+    #[test]
+    fn infer_select_isarray_refines_to_array() {
+        let isarray = Expr::and(
+            Expr::gte(Expr::identity(), Expr::literal(serde_json::json!([]))),
+            Expr::lt(Expr::identity(), Expr::literal(serde_json::json!({}))),
+        );
+        let expr = Expr::builtin(Builtin::Select, isarray);
+        let out = infer_expr_type(&expr, &Type::Any);
+        assert_eq!(out, Type::Array(Box::new(Type::Any)));
     }
 
     #[test]

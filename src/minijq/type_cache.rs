@@ -1,4 +1,6 @@
+use crate::minijq::parser::parse_expr;
 use crate::minijq::types::Type;
+use crate::minijq::typing::infer_predicate_refinement;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs;
@@ -165,13 +167,10 @@ fn render_cache(entries: &BTreeMap<String, TypeCacheEntry>) -> io::Result<String
                     format!("failed to encode subset markers for `{name}`: {err}"),
                 )
             })?;
+        let signature = render_display_signature(entry);
 
         let _ = writeln!(out);
-        let _ = writeln!(
-            out,
-            "let {name} : {} -> {}",
-            entry.analysis.final_input_type, entry.analysis.output_type
-        );
+        let _ = writeln!(out, "let {name} : {signature}");
         let _ = writeln!(out, "  -- source-json: {source_json}");
         let _ = writeln!(out, "  -- final-input-json: {final_input_json}");
         let _ = writeln!(out, "  -- output-json: {output_json}");
@@ -180,6 +179,41 @@ fn render_cache(entries: &BTreeMap<String, TypeCacheEntry>) -> io::Result<String
     }
 
     Ok(out)
+}
+
+fn render_display_signature(entry: &TypeCacheEntry) -> String {
+    let input = entry.analysis.final_input_type.clone().normalize();
+    let fallback = format!("{} -> {}", input, entry.analysis.output_type);
+
+    let Ok(expr) = parse_expr(&entry.source) else {
+        return fallback;
+    };
+    let Some(refinement) = infer_predicate_refinement(&expr, &entry.analysis.final_input_type)
+    else {
+        return fallback;
+    };
+    if !refinement.has_information() {
+        return fallback;
+    }
+    if matches!(
+        entry.analysis.output_type,
+        Type::BoolLiteral(true) | Type::BoolLiteral(false)
+    ) {
+        return fallback;
+    }
+    let true_is_input =
+        refinement.true_input.is_subtype_of(&input) && input.is_subtype_of(&refinement.true_input);
+    let false_is_input = refinement.false_input.is_subtype_of(&input)
+        && input.is_subtype_of(&refinement.false_input);
+    if refinement.unknown_input.is_never()
+        && ((true_is_input && refinement.false_input.is_never())
+            || (false_is_input && refinement.true_input.is_never()))
+    {
+        return fallback;
+    }
+
+    let pretty = refinement.pretty();
+    if pretty.is_empty() { fallback } else { pretty }
 }
 
 fn parse_cache(body: &str, path: &Path) -> io::Result<BTreeMap<String, TypeCacheEntry>> {
