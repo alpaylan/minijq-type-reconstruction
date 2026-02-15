@@ -13,16 +13,8 @@ pub fn all_examples() -> Vec<ExampleProgram> {
     let examples = [
         ("identity", "Identity filter (polymorphic)", "."),
         ("add_self", "Numeric self addition", ". + ."),
-        (
-            "alt_numeric",
-            "Fallback + arithmetic",
-            "(.n // 0) * 2",
-        ),
-        (
-            "length",
-            "Length on string/array/object",
-            "length(.)",
-        ),
+        ("alt_numeric", "Fallback + arithmetic", "(.n // 0) * 2"),
+        ("length", "Length on string/array/object", "length(.)"),
         ("first", "First element of an array", "first(.)"),
         ("last", "Last element of an array", "last(.)"),
         ("index0", "Index zero", ".[0]"),
@@ -117,6 +109,11 @@ pub fn all_examples() -> Vec<ExampleProgram> {
             "try (.raw | tonumber(.)) catch 0",
         ),
         (
+            "strict_tonumber",
+            "Strict conversion without catch to show refinement",
+            "tonumber(.)",
+        ),
+        (
             "sum_values_add",
             "Aggregate array values with add and recover from incompatible inputs",
             "try (.values | add(.)) catch null",
@@ -161,10 +158,46 @@ pub fn all_examples() -> Vec<ExampleProgram> {
             "Convert then ceil numeric value",
             "(.latency | tonumber(.)?) // 0 | ceil(.)",
         ),
+        ("type_probe", "Report dynamic type name", "type(.)"),
         (
-            "type_probe",
-            "Report dynamic type name",
-            "type(.)",
+            "bool_guard_or_error",
+            "Explicit error guard (inspired by tjq usage)",
+            "if . == true or . == false then 1 else error end",
+        ),
+        (
+            "bool_guard_and_error",
+            "Explicit error guard (inspired by tjq usage)",
+            "if . == true or . == false then error else \"alp\" end",
+        ),
+        (
+            "isnumber",
+            "Explicit error guard (inspired by tjq usage)",
+            "if . > true and . < \"\" then . else error end",
+        ),
+        (
+            "isstring",
+            "Explicit error guard (inspired by tjq usage)",
+            "if . >= \"\"  and . < [] then . else error end",
+        ),
+        (
+            "isarray",
+            "Explicit error guard (inspired by tjq usage)",
+            "if . >= []  and . < {} then . else error end",
+        ),
+        (
+            "isobject",
+            "Explicit error guard (inspired by tjq usage)",
+            "if . >= {} then . else error end",
+        ),
+        (
+            "tjq_word_reverse",
+            "Port of tjq short/test4 word-reversal pipeline",
+            ". | split(\" \") | map(split(\"\")) | reverse | map(reverse) | map(join(\"\")) | join(\" \")",
+        ),
+        (
+            "tjq_recipe_projection",
+            "Adapted from tjq short/test1 ingredient projection",
+            "[ .name, (.ingredients | length), (.ingredients | map(select(.item == \"sugar\") | .amount.quantity)) ]",
         ),
         (
             "double_pipeline",

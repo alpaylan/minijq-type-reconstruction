@@ -478,6 +478,7 @@ impl Parser {
 
 fn parse_builtin(name: &str) -> Option<Builtin> {
     match name {
+        "error" => Some(Builtin::Error),
         "length" => Some(Builtin::Length),
         "first" => Some(Builtin::First),
         "last" => Some(Builtin::Last),
@@ -938,5 +939,15 @@ mod tests {
     fn parse_split_join_pipeline() {
         let expr = parse_expr("split(\",\") | join(\"-\")").expect("must parse");
         assert_eq!(expr.to_string(), "split(\",\") | join(\"-\")");
+    }
+
+    #[test]
+    fn parse_explicit_error_in_if() {
+        let expr = parse_expr("if . == true or . == false then 1 else error end")
+            .expect("must parse");
+        assert_eq!(
+            expr.to_string(),
+            "if ((. == true) or (. == false)) then 1 else error(.) end"
+        );
     }
 }

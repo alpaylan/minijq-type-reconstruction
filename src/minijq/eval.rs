@@ -15,6 +15,9 @@ pub struct RuntimeTypeError {
 
 impl fmt::Display for RuntimeTypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.op == "error" {
+            return write!(f, "{}", self.message);
+        }
         write!(
             f,
             "{}: expected {}, got {} (input {})",
@@ -287,6 +290,7 @@ fn eval_builtin(
     root: &Value,
 ) -> Result<Value, RuntimeTypeError> {
     match op {
+        Builtin::Error => Err(explicit_error(argument, root)),
         Builtin::Length => match argument {
             Value::String(s) => Ok(Value::Number(Number::from(s.chars().count() as u64))),
             Value::Array(items) => Ok(Value::Number(Number::from(items.len() as u64))),
@@ -434,10 +438,26 @@ fn eval_builtin(
                 Value::String(sep) => {
                     let mut parts = Vec::with_capacity(items.len());
                     for item in items {
-                        let Some(text) = item.as_str() else {
-                            return Err(type_error("join", Type::String, item, root));
+                        let text = match item {
+                            Value::String(s) => s.clone(),
+                            Value::Number(n) => n.to_string(),
+                            Value::Bool(b) => b.to_string(),
+                            Value::Null => String::new(),
+                            other => {
+                                return Err(type_error(
+                                    "join",
+                                    Type::union(vec![
+                                        Type::String,
+                                        Type::Number,
+                                        Type::Bool,
+                                        Type::Null,
+                                    ]),
+                                    other,
+                                    root,
+                                ))
+                            }
                         };
-                        parts.push(text.to_string());
+                        parts.push(text);
                     }
                     Ok(Value::String(parts.join(sep)))
                 }
@@ -702,6 +722,21 @@ fn type_error(op: &str, expected: Type, actual_value: &Value, root: &Value) -> R
     }
 }
 
+fn explicit_error(argument: &Value, root: &Value) -> RuntimeTypeError {
+    let actual = Type::from_json_value(argument);
+    let rendered = match argument {
+        Value::String(s) => s.clone(),
+        other => format!("(not a string): {}", other),
+    };
+    RuntimeTypeError {
+        op: "error".to_string(),
+        expected: Type::Any,
+        actual,
+        input_type: Type::from_json_value(root),
+        message: format!("error: {rendered}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::eval;
@@ -891,6 +926,39 @@ mod tests {
     }
 
     #[test]
+    fn explicit_error_builtin_produces_runtime_error() {
+        let expr = Expr::builtin(Builtin::Error, Expr::identity());
+        let err = eval(&expr, &json!(null)).expect_err("must fail");
+        assert_eq!(err.op, "error");
+        assert!(err.message.contains("(not a string): null"));
+    }
+
+    #[test]
+    fn explicit_error_can_be_caught() {
+        let expr = Expr::try_catch(
+            Expr::builtin(Builtin::Error, Expr::identity()),
+            Expr::literal(json!(0)),
+        );
+        assert_eq!(eval(&expr, &json!(true)).expect("pass"), json!(0));
+    }
+
+    #[test]
+    fn boolean_guard_else_error() {
+        let expr = Expr::if_else(
+            Expr::or(
+                Expr::eq(Expr::identity(), Expr::literal(json!(true))),
+                Expr::eq(Expr::identity(), Expr::literal(json!(false))),
+            ),
+            Expr::literal(json!(1)),
+            Expr::builtin(Builtin::Error, Expr::identity()),
+        );
+        assert_eq!(eval(&expr, &json!(true)).expect("pass"), json!(1));
+        assert_eq!(eval(&expr, &json!(false)).expect("pass"), json!(1));
+        let err = eval(&expr, &json!(null)).expect_err("must fail");
+        assert_eq!(err.op, "error");
+    }
+
+    #[test]
     fn tostring_abs_floor_and_ceil_work() {
         let tostring = Expr::builtin(Builtin::ToString, Expr::identity());
         let abs = Expr::builtin(Builtin::Abs, Expr::identity());
@@ -934,6 +1002,13 @@ mod tests {
         assert_eq!(items, json!(["a", "b", "c"]));
         let joined = eval(&join, &items).expect("join pass");
         assert_eq!(joined, json!("a-b-c"));
+    }
+
+    #[test]
+    fn join_accepts_non_string_scalars_like_jq() {
+        let join = Expr::builtin(Builtin::Join, Expr::literal(json!(",")));
+        let out = eval(&join, &json!([1, true, null, "x"])).expect("join should pass");
+        assert_eq!(out, json!("1,true,,x"));
     }
 
     #[test]

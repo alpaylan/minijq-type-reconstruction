@@ -12,7 +12,9 @@ Prototype for automatic input type reconstruction (inference) for a dynamically 
 2. Infer a static input/output scheme for a filter.
 3. Randomly generate inputs from the current candidate type.
 4. Run the filter.
-5. If a dynamic type error occurs, subtract the failing region from the candidate type.
+5. If a dynamic type error occurs, probe more samples from that failing region:
+   - subtract it only when all probes fail
+   - otherwise keep it and mark it as `Subset<T>`
 6. Repeat until stable.
 
 ## Current Progress
@@ -32,12 +34,14 @@ Implemented:
   - subtraction
 - Type/scheme inference for expressions and builtins.
 - Runtime type checking with detailed `RuntimeTypeError`.
+- Subset markers for partially valid domains (`Subset<T>`), so reconstruction avoids over-constraining when only part of a type is invalid (e.g. `tonumber(.)` yields `Number | Subset<String>`).
 
 Language features currently supported:
 
 - navigation: `.field`, `.[idx]`, dynamic lookup `.[expr]`
 - postfix optional error suppression: `expr?`
 - `try expr catch expr`
+- explicit failures: `error` and `error("msg")`
 - literals: numbers (including floats), strings, booleans, null, arrays, objects
 - operators: `+ - * /`, comparisons, `and`, `or`, `//`, unary `not` and unary `-`
 - conditionals: `if ... then ... else ... end`
@@ -49,13 +53,14 @@ Builtins currently supported:
 - `map`, `select`
 - `has`, `contains`, `startswith`, `endswith`
 - `reverse`, `sort`
-- `tostring`, `tonumber`, `abs`, `floor`, `ceil`
+- `error`, `tostring`, `tonumber`, `abs`, `floor`, `ceil`
 - `add`, `min`, `max`, `split`, `join`
 
 Validation status:
 
-- `cargo test`: 92 passed, 0 failed.
+- `cargo test`: all tests passing (including jq compatibility checks).
 - `cargo run`: all bundled examples converge.
+- jq compatibility includes ported cases inspired by `tjq/tests/short/test1` and `tjq/tests/short/test4`.
 
 ## Run
 
@@ -63,6 +68,41 @@ Validation status:
 cargo test
 cargo run
 ```
+
+Run jq compatibility tests only:
+
+```bash
+cargo test --test jq_compat
+```
+
+Trace one program's reconstruction loop:
+
+```bash
+cargo run -- --program strict_tonumber --trace
+```
+
+Run reconstruction from a fully unbiased start (`Any`), without scheme-seeded input narrowing:
+
+```bash
+cargo run -- --unbiased
+```
+
+Trace all bundled examples:
+
+```bash
+cargo run -- --trace
+```
+
+Trace output includes:
+
+- candidate input type before/after each iteration
+- inferred output type
+- sample count
+- whether refinement happened
+- failing counterexample input
+- runtime error
+- subtracted type
+- marked subset (`Subset<T>`) when only part of a type is rejected
 
 ## Latest Example Results
 
@@ -98,7 +138,7 @@ Generated from current `cargo run` output.
 | `sum_values_add`           | `Object{values: Array<A2>, ..R0} -> Any`                                               | `Object{values: Array<Any>, ..Any}`                                             | `true`    |
 | `max_score_try`            | `Object{scores: NonEmptyArray<X2>, ..R0} -> X2 \| Null`                                | `Object{scores: NonEmptyArray<Any>, ..Any}`                                     | `true`    |
 | `csv_split`                | `Object{csv: String, ..R0} -> Array<String>`                                           | `Object{csv: String, ..Any}`                                                    | `true`    |
-| `tags_join`                | `Object{tags: Array<String>, ..R0} -> String`                                          | `Object{tags: Array<String>, ..Any}`                                            | `true`    |
+| `tags_join`                | `Object{tags: Array<Bool \| Null \| Number \| String>, ..R0} -> String`               | `Object{tags: Array<Bool \| Null \| Number \| String>, ..Any}`                 | `true`    |
 | `sorted_top_score`         | `Object{scores: Array<S3>, ..R0} -> I5 \| Null`                                        | `Object{scores: Array<Any>, ..Any}`                                             | `true`    |
 | `has_first_item`           | `NonEmptyArray<I1> -> I1 \| Null`                                                      | `NonEmptyArray<Any>`                                                            | `true`    |
 | `floating_threshold`       | `Object{latency: F1, ..R0} -> Bool`                                                    | `Object{latency: Any, ..Any}`                                                   | `true`    |

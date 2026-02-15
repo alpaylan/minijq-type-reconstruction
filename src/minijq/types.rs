@@ -189,7 +189,9 @@ impl Type {
                 }
             }
             (Type::Array(lhs), Type::Tuple(rhs_items)) => {
-                if rhs_items.iter().all(|item| item.is_subtype_of(&lhs)) {
+                if rhs_items.is_empty() {
+                    Type::NonEmptyArray(lhs).normalize()
+                } else if rhs_items.iter().all(|item| item.is_subtype_of(&lhs)) {
                     Type::Array(lhs)
                 } else {
                     Type::Array(lhs)
@@ -753,5 +755,12 @@ mod tests {
     fn from_json_array_becomes_tuple() {
         let ty = Type::from_json_value(&json!([1, "x", true]));
         assert_eq!(ty, Type::Tuple(vec![Type::Number, Type::String, Type::Bool]));
+    }
+
+    #[test]
+    fn subtract_empty_tuple_from_array_yields_nonempty_array() {
+        let ty = Type::Array(Box::new(Type::Any));
+        let out = ty.subtract(&Type::Tuple(vec![]));
+        assert_eq!(out, Type::NonEmptyArray(Box::new(Type::Any)));
     }
 }

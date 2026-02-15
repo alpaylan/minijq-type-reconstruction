@@ -23,13 +23,11 @@ pub fn generate_value(ty: &Type, rng: &mut impl Rng, max_depth: usize) -> Option
             Some(Value::Number(Number::from(value)))
         }
         Type::String => {
-            let len = rng.gen_range(0..=8);
-            let mut s = String::with_capacity(len);
-            for _ in 0..len {
-                let ch = (b'a' + rng.gen_range(0..26)) as char;
-                s.push(ch);
+            if rng.gen_bool(0.35) {
+                Some(Value::String(random_numeric_string(rng)))
+            } else {
+                Some(Value::String(random_alpha_string(rng)))
             }
-            Some(Value::String(s))
         }
         Type::Array(inner) => {
             if max_depth == 0 {
@@ -81,6 +79,28 @@ pub fn generate_value(ty: &Type, rng: &mut impl Rng, max_depth: usize) -> Option
         }
         Type::Generic(_) => generate_value(&Type::Any, rng, max_depth),
     }
+}
+
+fn random_numeric_string(rng: &mut impl Rng) -> String {
+    match rng.gen_range(0..=2) {
+        0 => rng.gen_range(-10_000..=10_000).to_string(),
+        1 => format!(
+            "{}.{}",
+            rng.gen_range(-1_000..=1_000),
+            rng.gen_range(0..=999)
+        ),
+        _ => format!("{}e{}", rng.gen_range(-100..=100), rng.gen_range(-6..=6)),
+    }
+}
+
+fn random_alpha_string(rng: &mut impl Rng) -> String {
+    let len = rng.gen_range(0..=8);
+    let mut s = String::with_capacity(len);
+    for _ in 0..len {
+        let ch = (b'a' + rng.gen_range(0..26)) as char;
+        s.push(ch);
+    }
+    s
 }
 
 fn generate_object(shape: ObjectShape, rng: &mut impl Rng, max_depth: usize) -> Option<Value> {

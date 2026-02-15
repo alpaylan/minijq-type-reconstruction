@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Builtin {
+    Error,
     Length,
     First,
     Last,
@@ -33,6 +34,7 @@ pub enum Builtin {
 impl Builtin {
     pub fn name(&self) -> &'static str {
         match self {
+            Builtin::Error => "error",
             Builtin::Length => "length",
             Builtin::First => "first",
             Builtin::Last => "last",
@@ -61,6 +63,11 @@ impl Builtin {
 
     pub fn scheme(&self) -> TypeScheme {
         match self {
+            Builtin::Error => TypeScheme {
+                vars: vec!["T".to_string()],
+                input: Type::Generic("T".to_string()),
+                output: Type::Never,
+            },
             Builtin::Length => TypeScheme {
                 vars: vec!["T".to_string()],
                 input: Type::union(vec![
@@ -165,7 +172,7 @@ impl Builtin {
             },
             Builtin::Min => TypeScheme {
                 vars: vec!["T".to_string()],
-                input: Type::NonEmptyArray(Box::new(Type::Generic("T".to_string()))),
+            input: Type::NonEmptyArray(Box::new(Type::Generic("T".to_string()))),
                 output: Type::Generic("T".to_string()),
             },
             Builtin::Max => TypeScheme {
@@ -180,7 +187,12 @@ impl Builtin {
             },
             Builtin::Join => TypeScheme {
                 vars: vec![],
-                input: Type::Array(Box::new(Type::String)),
+                input: Type::Array(Box::new(Type::union(vec![
+                    Type::String,
+                    Type::Number,
+                    Type::Bool,
+                    Type::Null,
+                ]))),
                 output: Type::String,
             },
         }
@@ -553,7 +565,12 @@ fn infer_join_builtin_type(inner: &Expr, input: &Type) -> Type {
         return Type::Never;
     }
 
-    let arr_ty = Type::Array(Box::new(Type::String));
+    let arr_ty = Type::Array(Box::new(Type::union(vec![
+        Type::String,
+        Type::Number,
+        Type::Bool,
+        Type::Null,
+    ])));
     if input.intersect(&arr_ty).normalize().is_never() {
         Type::Never
     } else {
@@ -620,6 +637,10 @@ fn infer_poly(expr: &Expr, input: Type, ctx: &mut PolyInferCtx) -> Type {
                     Type::Number
                 }
             }
+        }
+        Expr::Builtin(Builtin::Error, inner) => {
+            let _inner_ty = infer_poly(inner, input, ctx);
+            Type::Never
         }
         Expr::Builtin(Builtin::First, inner) | Expr::Builtin(Builtin::Last, inner) => {
             let inner_ty = infer_poly(inner, input, ctx);
@@ -728,7 +749,15 @@ fn infer_poly(expr: &Expr, input: Type, ctx: &mut PolyInferCtx) -> Type {
         }
         Expr::Builtin(Builtin::Join, inner) => {
             let sep_ty = infer_poly(inner, input.clone(), ctx);
-            ctx.add_constraint(input, Type::Array(Box::new(Type::String)));
+            ctx.add_constraint(
+                input,
+                Type::Array(Box::new(Type::union(vec![
+                    Type::String,
+                    Type::Number,
+                    Type::Bool,
+                    Type::Null,
+                ]))),
+            );
             ctx.add_constraint(sep_ty, Type::String);
             Type::String
         }
@@ -1417,6 +1446,17 @@ mod tests {
             infer_expr_type(&join, &Type::Array(Box::new(Type::String))),
             Type::String
         );
+        assert_eq!(
+            infer_expr_type(
+                &join,
+                &Type::Array(Box::new(Type::union(vec![
+                    Type::Number,
+                    Type::Bool,
+                    Type::Null,
+                ]))),
+            ),
+            Type::String
+        );
         assert_eq!(infer_expr_type(&split, &Type::Number), Type::Never);
     }
 
@@ -1431,10 +1471,37 @@ mod tests {
     }
 
     #[test]
+    fn infer_error_returns_never() {
+        let expr = Expr::builtin(Builtin::Error, Expr::identity());
+        assert_eq!(infer_expr_type(&expr, &Type::Any), Type::Never);
+    }
+
+    #[test]
+    fn infer_boolean_guard_else_error_is_number() {
+        let expr = Expr::if_else(
+            Expr::or(
+                Expr::eq(Expr::identity(), Expr::literal(serde_json::json!(true))),
+                Expr::eq(Expr::identity(), Expr::literal(serde_json::json!(false))),
+            ),
+            Expr::literal(serde_json::json!(1)),
+            Expr::builtin(Builtin::Error, Expr::identity()),
+        );
+        assert_eq!(infer_expr_type(&expr, &Type::Any), Type::Number);
+    }
+
+    #[test]
     fn infer_scheme_identity_is_generic() {
         let scheme = infer_expr_scheme(&Expr::identity());
         assert_eq!(scheme.input, scheme.output);
         assert_eq!(scheme.vars.len(), 1);
+    }
+
+    #[test]
+    fn infer_scheme_error_is_any_to_never() {
+        let scheme = infer_expr_scheme(&Expr::builtin(Builtin::Error, Expr::identity()));
+        assert_eq!(scheme.output, Type::Never);
+        assert_eq!(scheme.vars.len(), 1);
+        assert_eq!(scheme.input, Type::Generic(scheme.vars[0].clone()));
     }
 
     #[test]
