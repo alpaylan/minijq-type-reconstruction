@@ -166,6 +166,34 @@ Examples currently covered by tests:
    Bad input: `[]`
    Diagnosis: root input must be a non-empty array.
 
+### jq Runtime Wrapper (`jqv`)
+
+The repository now includes a `jqv` binary (`src/bin/jqv.rs`) that forwards arguments directly to your system `jq` and only intervenes when jq exits with runtime error code `5`.
+
+On a runtime error, `jqv`:
+
+- infers/reuses reconstructed input domains for the invoked filter
+- replays the input through minijq analysis
+- prints a validator report with path-aware diagnostics
+
+Build and run locally:
+
+```bash
+cargo build --release --bin jqv
+./target/release/jqv '.a + 1' input.json
+```
+
+You can override the jq executable path with `JQ_BIN`:
+
+```bash
+JQ_BIN=/usr/local/bin/jq ./target/release/jqv '.foo' input.json
+```
+
+### CI and Release
+
+- `.github/workflows/ci.yml`: runs formatting checks and tests on PRs/pushes.
+- `.github/workflows/release.yml`: on tag pushes like `v0.1.0`, builds `jqv` for Linux/macOS/Windows and publishes archives plus `SHA256SUMS.txt` to GitHub Releases.
+
 ## Curated Examples
 
 For a ready-to-browse set of filters, inputs, jq outputs, and validator diagnostics, see:

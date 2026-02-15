@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --locked
+
+  build:
+    needs:
+      - test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            bin: jqv
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            bin: jqv
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            bin: jqv
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            bin: jqv.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build jqv
+        run: cargo build --release --locked --bin jqv --target ${{ matrix.target }}
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          package_dir="jqv-${{ matrix.target }}"
+          mkdir "$package_dir"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$package_dir/jqv"
+          tar -czf "${package_dir}.tar.gz" "$package_dir"
+          rm -rf "$package_dir"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $packageDir = "jqv-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$packageDir/jqv.exe"
+          Compress-Archive -Path "$packageDir/*" -DestinationPath "$packageDir.zip" -Force
+          Remove-Item -Recurse -Force $packageDir
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jqv-${{ matrix.target }}
+          path: jqv-${{ matrix.target }}.${{ matrix.archive }}
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs:
+      - build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: jqv-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum jqv-* > SHA256SUMS.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true
