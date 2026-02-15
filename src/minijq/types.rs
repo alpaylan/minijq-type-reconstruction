@@ -68,8 +68,11 @@ pub enum Type {
     Any,
     Null,
     Bool,
+    BoolLiteral(bool),
     Number,
+    NumberLiteral(String),
     String,
+    StringLiteral(String),
     Array(Box<Type>),
     NonEmptyArray(Box<Type>),
     Tuple(Vec<Type>),
@@ -157,6 +160,13 @@ impl Type {
             (lhs, Type::Union(items)) => {
                 items.into_iter().fold(lhs, |acc, item| acc.subtract(&item))
             }
+            (Type::BoolLiteral(_), Type::Bool) => Type::Never,
+            (Type::Bool, Type::BoolLiteral(true)) => Type::BoolLiteral(false),
+            (Type::Bool, Type::BoolLiteral(false)) => Type::BoolLiteral(true),
+            (Type::NumberLiteral(_), Type::Number) => Type::Never,
+            (Type::Number, Type::NumberLiteral(_)) => Type::Number,
+            (Type::StringLiteral(_), Type::String) => Type::Never,
+            (Type::String, Type::StringLiteral(_)) => Type::String,
             (Type::Generic(a), Type::Generic(b)) if a == b => Type::Never,
             (Type::Generic(name), _) => Type::Generic(name),
             (lhs, rhs) if lhs == rhs => Type::Never,
@@ -246,6 +256,15 @@ impl Type {
             (lhs, Type::Any) | (Type::Any, lhs) => lhs,
             (Type::Union(items), rhs) => Type::union(items.into_iter().map(|t| t.intersect(&rhs))),
             (lhs, Type::Union(items)) => Type::union(items.into_iter().map(|t| lhs.intersect(&t))),
+            (Type::Bool, Type::BoolLiteral(v)) | (Type::BoolLiteral(v), Type::Bool) => {
+                Type::BoolLiteral(v)
+            }
+            (Type::Number, Type::NumberLiteral(v)) | (Type::NumberLiteral(v), Type::Number) => {
+                Type::NumberLiteral(v)
+            }
+            (Type::String, Type::StringLiteral(v)) | (Type::StringLiteral(v), Type::String) => {
+                Type::StringLiteral(v)
+            }
             (Type::Array(lhs), Type::Array(rhs)) => {
                 Type::Array(Box::new(lhs.intersect(&rhs))).normalize()
             }
@@ -315,6 +334,9 @@ impl Type {
             (_, Type::Never) => false,
             (Type::Union(items), sup) => items.iter().all(|item| item.is_subtype_of(&sup)),
             (sub, Type::Union(items)) => items.iter().any(|item| sub.is_subtype_of(item)),
+            (Type::BoolLiteral(_), Type::Bool) => true,
+            (Type::NumberLiteral(_), Type::Number) => true,
+            (Type::StringLiteral(_), Type::String) => true,
             (Type::Array(sub), Type::Array(sup)) => sub.is_subtype_of(&sup),
             (Type::NonEmptyArray(sub), Type::Array(sup)) => sub.is_subtype_of(&sup),
             (Type::NonEmptyArray(sub), Type::NonEmptyArray(sup)) => sub.is_subtype_of(&sup),
@@ -337,9 +359,9 @@ impl Type {
     pub fn from_json_value(value: &Value) -> Type {
         match value {
             Value::Null => Type::Null,
-            Value::Bool(_) => Type::Bool,
-            Value::Number(_) => Type::Number,
-            Value::String(_) => Type::String,
+            Value::Bool(b) => Type::BoolLiteral(*b),
+            Value::Number(n) => Type::NumberLiteral(n.to_string()),
+            Value::String(s) => Type::StringLiteral(s.clone()),
             Value::Array(items) => Type::Tuple(items.iter().map(Type::from_json_value).collect()),
             Value::Object(map) => {
                 let fields = map
@@ -361,8 +383,14 @@ impl Type {
             Type::Any => "any".to_string(),
             Type::Null => "null".to_string(),
             Type::Bool => "bool".to_string(),
+            Type::BoolLiteral(v) => format!("boollit:{v}"),
             Type::Number => "number".to_string(),
+            Type::NumberLiteral(n) => format!("numberlit:{n}"),
             Type::String => "string".to_string(),
+            Type::StringLiteral(s) => {
+                let escaped = serde_json::to_string(s).unwrap_or_else(|_| s.clone());
+                format!("stringlit:{escaped}")
+            }
             Type::Array(inner) => format!("array<{}>", inner.stable_key()),
             Type::NonEmptyArray(inner) => format!("nonempty<{}>", inner.stable_key()),
             Type::Tuple(items) => {
@@ -656,8 +684,14 @@ impl fmt::Display for Type {
             Type::Any => write!(f, "Any"),
             Type::Null => write!(f, "Null"),
             Type::Bool => write!(f, "Bool"),
+            Type::BoolLiteral(v) => write!(f, "Bool<{}>", v),
             Type::Number => write!(f, "Number"),
+            Type::NumberLiteral(n) => write!(f, "Number<{}>", n),
             Type::String => write!(f, "String"),
+            Type::StringLiteral(s) => {
+                let escaped = serde_json::to_string(s).map_err(|_| fmt::Error)?;
+                write!(f, "String<{}>", escaped)
+            }
             Type::Array(inner) => write!(f, "Array<{}>", inner),
             Type::NonEmptyArray(inner) => write!(f, "NonEmptyArray<{}>", inner),
             Type::Tuple(items) => {
@@ -772,7 +806,30 @@ mod tests {
         let ty = Type::from_json_value(&json!([1, "x", true]));
         assert_eq!(
             ty,
-            Type::Tuple(vec![Type::Number, Type::String, Type::Bool])
+            Type::Tuple(vec![
+                Type::NumberLiteral("1".to_string()),
+                Type::StringLiteral("x".to_string()),
+                Type::BoolLiteral(true),
+            ])
+        );
+    }
+
+    #[test]
+    fn literals_are_subtypes_of_primitives() {
+        assert!(Type::BoolLiteral(true).is_subtype_of(&Type::Bool));
+        assert!(Type::NumberLiteral("7".to_string()).is_subtype_of(&Type::Number));
+        assert!(Type::StringLiteral("x".to_string()).is_subtype_of(&Type::String));
+    }
+
+    #[test]
+    fn subtract_bool_literal_from_bool_keeps_other_literal() {
+        assert_eq!(
+            Type::Bool.subtract(&Type::BoolLiteral(true)),
+            Type::BoolLiteral(false)
+        );
+        assert_eq!(
+            Type::Bool.subtract(&Type::BoolLiteral(false)),
+            Type::BoolLiteral(true)
         );
     }
 

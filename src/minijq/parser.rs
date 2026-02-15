@@ -318,7 +318,7 @@ impl Parser {
 
         if let Some(TokenWithPos {
             token: Token::Identifier(name),
-            pos,
+            ..
         }) = self.peek().cloned()
         {
             self.advance();
@@ -326,18 +326,16 @@ impl Parser {
             if self.match_token(&Token::LParen) {
                 let arg = self.parse_pipe()?;
                 self.expect(Token::RParen)?;
-                let builtin = parse_builtin(&name).ok_or(ParseError {
-                    position: pos,
-                    message: format!("unknown builtin `{name}`"),
-                })?;
-                return Ok(Expr::builtin(builtin, arg));
+                if let Some(builtin) = parse_builtin(&name) {
+                    return Ok(Expr::builtin(builtin, arg));
+                }
+                return Ok(Expr::call(name, arg));
             }
 
-            let builtin = parse_builtin(&name).ok_or(ParseError {
-                position: pos,
-                message: format!("unexpected bare identifier `{name}`"),
-            })?;
-            return Ok(Expr::builtin(builtin, Expr::identity()));
+            if let Some(builtin) = parse_builtin(&name) {
+                return Ok(Expr::builtin(builtin, Expr::identity()));
+            }
+            return Ok(Expr::call(name, Expr::identity()));
         }
 
         if let Some(TokenWithPos {
@@ -885,6 +883,18 @@ mod tests {
     fn parse_map_select() {
         let expr = parse_expr("map(select(. > 0))").expect("must parse");
         assert_eq!(expr.to_string(), "map(select((. > 0)))");
+    }
+
+    #[test]
+    fn parse_user_filter_reference() {
+        let expr = parse_expr("isboolean").expect("must parse");
+        assert_eq!(expr.to_string(), "isboolean");
+    }
+
+    #[test]
+    fn parse_user_filter_call_with_argument() {
+        let expr = parse_expr("isboolean(.x)").expect("must parse");
+        assert_eq!(expr.to_string(), "isboolean(.x)");
     }
 
     #[test]

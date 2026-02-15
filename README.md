@@ -26,6 +26,7 @@ Implemented:
   - `.minijq.typecache.mjqi` stores the reconstructed valid input domain, output type, subset markers, and convergence status.
 - Structural JSON-like types with:
   - `Any`, `Never`, primitives.
+  - scalar literal refinement: `Bool<true/false>`, `Number<...>`, `String<...>`.
   - `Array<T>`, `NonEmptyArray<T>`, tuples.
   - object shapes with required fields plus row tails.
   - unions and generics.
@@ -118,6 +119,15 @@ cargo run -- --refresh-type-cache
 # disable cache for a run
 cargo run -- --no-type-cache
 ```
+
+Analyze a definitions file and emit a sibling interface file:
+
+```bash
+cargo run -- --analyze-file defs.mjq
+# writes defs.mjqi
+```
+
+`defs.mjqi` stores runtime-informed schemes from reconstructed valid input domains for each analyzable `def`, and appends comments for unsupported definitions.
 
 Run jq compatibility tests only:
 

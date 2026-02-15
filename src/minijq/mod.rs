@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod defs;
 pub mod eval;
 pub mod examples;
 pub mod generator;
@@ -9,6 +10,7 @@ pub mod types;
 pub mod typing;
 
 pub use ast::{BinaryOp, Expr, UnaryOp};
+pub use defs::{DefParseError, Definition, parse_definitions};
 pub use eval::{RuntimeTypeError, eval};
 pub use examples::{ExampleProgram, all_examples};
 pub use generator::generate_value;

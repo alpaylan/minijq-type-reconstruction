@@ -28,6 +28,18 @@ impl Default for ReconstructionConfig {
     }
 }
 
+impl ReconstructionConfig {
+    pub fn strong() -> Self {
+        ReconstructionConfig {
+            max_iterations: 300,
+            samples_per_iteration: 96,
+            max_value_depth: 12,
+            rejection_probe_samples: 36,
+            required_success_rounds: 6,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IterationTrace {
     pub iteration: usize,
@@ -392,6 +404,9 @@ fn broaden_to_root_kind(ty: &Type) -> Type {
         Type::NonEmptyArray(_) => Type::NonEmptyArray(Box::new(Type::Any)),
         Type::Object(_) => Type::Object(ObjectShape::open_any()),
         Type::Union(items) => Type::union(items.iter().map(broaden_to_root_kind)),
+        Type::BoolLiteral(_) => Type::Bool,
+        Type::NumberLiteral(_) => Type::Number,
+        Type::StringLiteral(_) => Type::String,
         Type::Generic(_) => Type::Any,
         other => other.clone(),
     }

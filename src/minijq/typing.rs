@@ -289,6 +289,14 @@ pub fn infer_expr_type(expr: &Expr, input: &Type) -> Type {
                 .instantiate_output(&inner_type)
                 .unwrap_or(Type::Never)
         }
+        Expr::Call(_, inner) => {
+            let arg_ty = infer_expr_type(inner, input);
+            if arg_ty.is_never() {
+                Type::Never
+            } else {
+                Type::Any
+            }
+        }
         Expr::Field(inner, name) => field_output_type(&infer_expr_type(inner, input), name),
         Expr::Index(inner, idx) => index_output_type(&infer_expr_type(inner, input), *idx),
         Expr::Lookup(inner, key) => {
@@ -350,13 +358,48 @@ fn infer_binary_type(op: BinaryOp, left: Type, right: Type) -> Type {
                 Type::Never
             }
         }
-        BinaryOp::Eq | BinaryOp::Ne => Type::Bool,
+        BinaryOp::Eq | BinaryOp::Ne => {
+            if left.intersect(&right).normalize().is_never() {
+                return if matches!(op, BinaryOp::Eq) {
+                    Type::BoolLiteral(false)
+                } else {
+                    Type::BoolLiteral(true)
+                };
+            }
+            if let Some(eq) = literal_equality(&left, &right) {
+                return if matches!(op, BinaryOp::Eq) {
+                    Type::BoolLiteral(eq)
+                } else {
+                    Type::BoolLiteral(!eq)
+                };
+            }
+            Type::Bool
+        }
         BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => Type::Bool,
-        BinaryOp::And | BinaryOp::Or => Type::Bool,
+        BinaryOp::And | BinaryOp::Or => match (&left, &right) {
+            (Type::BoolLiteral(a), Type::BoolLiteral(b)) => {
+                Type::BoolLiteral(if matches!(op, BinaryOp::And) {
+                    *a && *b
+                } else {
+                    *a || *b
+                })
+            }
+            _ => Type::Bool,
+        },
         BinaryOp::Alt => {
             let narrowed_left = left.subtract(&Type::Null).normalize();
             Type::union(vec![narrowed_left, right])
         }
+    }
+}
+
+fn literal_equality(left: &Type, right: &Type) -> Option<bool> {
+    match (left, right) {
+        (Type::Null, Type::Null) => Some(true),
+        (Type::BoolLiteral(a), Type::BoolLiteral(b)) => Some(a == b),
+        (Type::NumberLiteral(a), Type::NumberLiteral(b)) => Some(a == b),
+        (Type::StringLiteral(a), Type::StringLiteral(b)) => Some(a == b),
+        _ => None,
     }
 }
 
@@ -588,7 +631,10 @@ fn infer_unary_type(op: UnaryOp, inner: Type) -> Type {
     }
 
     match op {
-        UnaryOp::Not => Type::Bool,
+        UnaryOp::Not => match inner {
+            Type::BoolLiteral(v) => Type::BoolLiteral(!v),
+            _ => Type::Bool,
+        },
         UnaryOp::Neg => {
             if inner.is_subtype_of(&Type::Number) {
                 Type::Number
@@ -764,6 +810,10 @@ fn infer_poly(expr: &Expr, input: Type, ctx: &mut PolyInferCtx) -> Type {
             );
             ctx.add_constraint(sep_ty, Type::String);
             Type::String
+        }
+        Expr::Call(_, inner) => {
+            let _arg_ty = infer_poly(inner, input, ctx);
+            Type::Any
         }
         Expr::Field(inner, name) => {
             let inner_ty = infer_poly(inner, input, ctx);
@@ -1318,6 +1368,18 @@ mod tests {
     }
 
     #[test]
+    fn infer_literal_boolean_results() {
+        let eq = Expr::eq(
+            Expr::literal(serde_json::json!(true)),
+            Expr::literal(serde_json::json!(false)),
+        );
+        let not = Expr::not(Expr::literal(serde_json::json!(true)));
+
+        assert_eq!(infer_expr_type(&eq, &Type::Any), Type::BoolLiteral(false));
+        assert_eq!(infer_expr_type(&not, &Type::Any), Type::BoolLiteral(false));
+    }
+
+    #[test]
     fn infer_if_else_unions_outputs() {
         let expr = Expr::if_else(
             Expr::literal(serde_json::json!(true)),
@@ -1326,7 +1388,10 @@ mod tests {
         );
         assert_eq!(
             infer_expr_type(&expr, &Type::Any),
-            Type::union(vec![Type::Number, Type::String])
+            Type::union(vec![
+                Type::NumberLiteral("1".to_string()),
+                Type::StringLiteral("x".to_string())
+            ])
         );
     }
 
@@ -1507,7 +1572,10 @@ mod tests {
             Expr::literal(serde_json::json!(1)),
             Expr::builtin(Builtin::Error, Expr::identity()),
         );
-        assert_eq!(infer_expr_type(&expr, &Type::Any), Type::Number);
+        assert_eq!(
+            infer_expr_type(&expr, &Type::Any),
+            Type::NumberLiteral("1".to_string())
+        );
     }
 
     #[test]

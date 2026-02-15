@@ -51,6 +51,16 @@ fn eval_inner(expr: &Expr, current: &Value, root: &Value) -> Result<Value, Runti
             let argument = eval_inner(inner, current, root)?;
             eval_builtin(*op, &argument, current, root)
         }
+        Expr::Call(name, inner) => {
+            let argument = eval_inner(inner, current, root)?;
+            Err(RuntimeTypeError {
+                op: "call".to_string(),
+                expected: Type::Any,
+                actual: Type::from_json_value(&argument),
+                input_type: Type::from_json_value(root),
+                message: format!("unknown filter `{name}`"),
+            })
+        }
         Expr::Field(inner, field) => {
             let value = eval_inner(inner, current, root)?;
             match value {
@@ -369,14 +379,14 @@ fn eval_builtin(
                 let parsed = s.parse::<f64>().map_err(|_| RuntimeTypeError {
                     op: "tonumber".to_string(),
                     expected: Type::Number,
-                    actual: Type::String,
+                    actual: Type::from_json_value(argument),
                     input_type: Type::from_json_value(root),
                     message: format!("tonumber: invalid numeric string `{s}`"),
                 })?;
                 let number = Number::from_f64(parsed).ok_or(RuntimeTypeError {
                     op: "tonumber".to_string(),
                     expected: Type::Number,
-                    actual: Type::String,
+                    actual: Type::from_json_value(argument),
                     input_type: Type::from_json_value(root),
                     message: "tonumber: parsed non-finite number".to_string(),
                 })?;
@@ -396,7 +406,7 @@ fn eval_builtin(
             let out = Number::from_f64(n.abs()).ok_or(RuntimeTypeError {
                 op: "abs".to_string(),
                 expected: Type::Number,
-                actual: Type::Number,
+                actual: Type::from_json_value(argument),
                 input_type: Type::from_json_value(root),
                 message: "abs: produced non-finite number".to_string(),
             })?;
@@ -409,7 +419,7 @@ fn eval_builtin(
             let out = Number::from_f64(n.floor()).ok_or(RuntimeTypeError {
                 op: "floor".to_string(),
                 expected: Type::Number,
-                actual: Type::Number,
+                actual: Type::from_json_value(argument),
                 input_type: Type::from_json_value(root),
                 message: "floor: produced non-finite number".to_string(),
             })?;
@@ -422,7 +432,7 @@ fn eval_builtin(
             let out = Number::from_f64(n.ceil()).ok_or(RuntimeTypeError {
                 op: "ceil".to_string(),
                 expected: Type::Number,
-                actual: Type::Number,
+                actual: Type::from_json_value(argument),
                 input_type: Type::from_json_value(root),
                 message: "ceil: produced non-finite number".to_string(),
             })?;
@@ -798,7 +808,7 @@ mod tests {
         let expr = Expr::mul(Expr::identity(), Expr::literal(json!(2)));
         let err = eval(&expr, &json!("abc")).expect_err("must fail");
         assert_eq!(err.expected, Type::Number);
-        assert_eq!(err.actual, Type::String);
+        assert_eq!(err.actual, Type::StringLiteral("abc".to_string()));
     }
 
     #[test]
@@ -886,7 +896,7 @@ mod tests {
     fn has_errors_on_invalid_input_kind() {
         let expr = Expr::builtin(Builtin::Has, Expr::literal(json!("x")));
         let err = eval(&expr, &json!(10)).expect_err("must fail");
-        assert_eq!(err.actual, Type::Number);
+        assert_eq!(err.actual, Type::NumberLiteral("10".to_string()));
     }
 
     #[test]
@@ -1107,13 +1117,13 @@ mod tests {
         let expr = Expr::builtin(Builtin::Length, Expr::identity());
         let err = eval(&expr, &json!(true)).expect_err("must fail");
         assert!(err.expected.is_subtype_of(&Type::Any));
-        assert_eq!(err.actual, Type::Bool);
+        assert_eq!(err.actual, Type::BoolLiteral(true));
     }
 
     #[test]
     fn field_on_non_object_errors() {
         let expr = Expr::field(Expr::identity(), "x");
         let err = eval(&expr, &json!(10)).expect_err("must fail");
-        assert_eq!(err.actual, Type::Number);
+        assert_eq!(err.actual, Type::NumberLiteral("10".to_string()));
     }
 }

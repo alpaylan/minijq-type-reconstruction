@@ -117,6 +117,11 @@ impl TypeCache {
             return Ok(false);
         }
 
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn save(&mut self) -> io::Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -124,7 +129,7 @@ impl TypeCache {
         let rendered = render_cache(&self.entries)?;
         fs::write(&self.path, rendered)?;
         self.dirty = false;
-        Ok(true)
+        Ok(())
     }
 }
 

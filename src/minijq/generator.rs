@@ -18,10 +18,12 @@ pub fn generate_value(ty: &Type, rng: &mut impl Rng, max_depth: usize) -> Option
         }
         Type::Null => Some(Value::Null),
         Type::Bool => Some(Value::Bool(rng.gen_bool(0.5))),
+        Type::BoolLiteral(v) => Some(Value::Bool(v)),
         Type::Number => {
             let value: i64 = rng.gen_range(-100..=100);
             Some(Value::Number(Number::from(value)))
         }
+        Type::NumberLiteral(text) => parse_number_literal(&text).map(Value::Number),
         Type::String => {
             if rng.gen_bool(0.35) {
                 Some(Value::String(random_numeric_string(rng)))
@@ -29,6 +31,7 @@ pub fn generate_value(ty: &Type, rng: &mut impl Rng, max_depth: usize) -> Option
                 Some(Value::String(random_alpha_string(rng)))
             }
         }
+        Type::StringLiteral(text) => Some(Value::String(text)),
         Type::Array(inner) => {
             if max_depth == 0 {
                 return Some(Value::Array(Vec::new()));
@@ -90,6 +93,14 @@ fn random_numeric_string(rng: &mut impl Rng) -> String {
             rng.gen_range(0..=999)
         ),
         _ => format!("{}e{}", rng.gen_range(-100..=100), rng.gen_range(-6..=6)),
+    }
+}
+
+fn parse_number_literal(text: &str) -> Option<Number> {
+    let value = serde_json::from_str::<Value>(text).ok()?;
+    match value {
+        Value::Number(number) => Some(number),
+        _ => None,
     }
 }
 

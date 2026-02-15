@@ -62,6 +62,7 @@ pub enum Expr {
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     Builtin(Builtin, Box<Expr>),
+    Call(String, Box<Expr>),
     Field(Box<Expr>, String),
     Index(Box<Expr>, usize),
     Lookup(Box<Expr>, Box<Expr>),
@@ -164,6 +165,10 @@ impl Expr {
         Expr::Builtin(op, Box::new(input))
     }
 
+    pub fn call(name: impl Into<String>, input: Expr) -> Expr {
+        Expr::Call(name.into(), Box::new(input))
+    }
+
     pub fn field(input: Expr, name: impl Into<String>) -> Expr {
         Expr::Field(Box::new(input), name.into())
     }
@@ -214,6 +219,13 @@ impl fmt::Display for Expr {
             Expr::Unary(UnaryOp::Not, inner) => write!(f, "(not {})", inner),
             Expr::Unary(UnaryOp::Neg, inner) => write!(f, "(-{})", inner),
             Expr::Builtin(op, expr) => write!(f, "{}({})", op.name(), expr),
+            Expr::Call(name, expr) => {
+                if matches!(expr.as_ref(), Expr::Identity) {
+                    write!(f, "{name}")
+                } else {
+                    write!(f, "{}({})", name, expr)
+                }
+            }
             Expr::Field(expr, name) => {
                 if matches!(expr.as_ref(), Expr::Identity) {
                     write!(f, ".{}", name)
