@@ -1,7 +1,10 @@
 [package]
-name = "typereconstruction"
+name = "minijq-type-reconstruction"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "typereconstruction"
 
 [dependencies]
 rand = "0.8"

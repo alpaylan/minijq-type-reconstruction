@@ -1,0 +1,1 @@
+jq: error (at examples/inputs/large_mid_error/invalid.json:50002): string ("oops") and number (1) cannot be added

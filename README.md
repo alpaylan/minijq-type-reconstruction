@@ -199,6 +199,8 @@ JQ_BIN=/usr/local/bin/jq ./target/release/jqv '.foo' input.json
 For a ready-to-browse set of filters, inputs, jq outputs, and validator diagnostics, see:
 
 - `examples/README.md`
+- `examples/results/perf_summary.md` for jq vs jqv overhead numbers on the curated cases.
+- includes a `large_mid_error` case with 50k records (50002-line JSON input) and a mid-array failure at index `25000`.
 
 To regenerate all example result snapshots:
 
@@ -211,6 +213,8 @@ Run jq compatibility tests only:
 ```bash
 cargo test --test jq_compat
 ```
+
+`jq_compat` tests expect `jq >= 1.7.1` (CI pins `jq-1.7.1`).
 
 Trace one program's reconstruction loop:
 

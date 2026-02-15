@@ -1,0 +1,7 @@
+bench_runs=20
+jq.valid.avg_ms=323.615
+jqv.valid.avg_ms=298.010
+valid.overhead_pct=-7.9%
+jq.invalid.avg_ms=50.033
+jqv.invalid.avg_ms=360.838
+invalid.overhead_pct=+621.2%

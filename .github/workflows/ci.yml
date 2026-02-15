@@ -13,10 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install jq
+      - name: Install jq 1.7.1
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL \
+            -o "$HOME/.local/bin/jq" \
+            "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+          chmod +x "$HOME/.local/bin/jq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          jq --version
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
