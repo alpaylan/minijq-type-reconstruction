@@ -32,7 +32,7 @@ fn print_usage(program: &str) {
 
 fn parse_jq_invocation(args: &[String]) -> ParsedInvocation {
     let mut parsed = ParsedInvocation::default();
-    let mut positional = Vec::new();
+    let mut positional_are_args = false;
     let mut i = 0usize;
     let mut after_double_dash = false;
 
@@ -44,72 +44,118 @@ fn parse_jq_invocation(args: &[String]) -> ParsedInvocation {
             continue;
         }
 
-        if !after_double_dash && arg.starts_with('-') {
-            if arg == "-n" || arg == "--null-input" {
-                parsed.null_input = true;
-                i += 1;
-                continue;
-            }
-
-            if arg == "-f" || arg == "--from-file" {
-                if let Some(path) = args.get(i + 1) {
-                    parsed.filter_file = Some(path.clone());
-                    i += 2;
+        if !after_double_dash && arg.starts_with('-') && arg != "-" {
+            if let Some(long) = arg.strip_prefix("--") {
+                if long == "null-input" {
+                    parsed.null_input = true;
+                    i += 1;
                     continue;
                 }
-                i += 1;
-                continue;
-            }
-
-            if let Some(path) = arg.strip_prefix("--from-file=") {
-                parsed.filter_file = Some(path.to_string());
-                i += 1;
-                continue;
-            }
-
-            if let Some(path) = arg.strip_prefix("-f") {
-                if !path.is_empty() {
+                if long == "args" || long == "jsonargs" {
+                    positional_are_args = true;
+                    i += 1;
+                    continue;
+                }
+                if long == "run-tests" {
+                    i += 1;
+                    if let Some(next) = args.get(i) {
+                        if !next.starts_with('-') {
+                            i += 1;
+                        }
+                    }
+                    continue;
+                }
+                if long == "from-file" {
+                    if let Some(path) = args.get(i + 1) {
+                        parsed.filter_file = Some(path.clone());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if let Some(path) = long.strip_prefix("from-file=") {
                     parsed.filter_file = Some(path.to_string());
                     i += 1;
                     continue;
                 }
-            }
+                if long == "library-path" || long == "indent" {
+                    if args.get(i + 1).is_some() {
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if long.starts_with("library-path=") || long.starts_with("indent=") {
+                    i += 1;
+                    continue;
+                }
+                if matches!(
+                    long,
+                    "arg" | "argjson" | "slurpfile" | "rawfile" | "argfile"
+                ) {
+                    let remaining = args.len().saturating_sub(i + 1);
+                    i += 1 + remaining.min(2);
+                    continue;
+                }
 
-            let takes_two = matches!(
-                arg.as_str(),
-                "--arg" | "--argjson" | "--slurpfile" | "--rawfile" | "--argfile"
-            );
-            if takes_two {
-                i += 3;
-                continue;
-            }
-
-            let takes_one = matches!(arg.as_str(), "-L" | "--library-path");
-            if takes_one {
-                i += 2;
-                continue;
-            }
-
-            if arg.starts_with("-L") && arg.len() > 2 {
+                // Remaining long options are either no-arg flags (formatting, stream,
+                // help/version toggles) or unsupported validator modes; they should not
+                // perturb filter/input discovery.
                 i += 1;
                 continue;
             }
 
+            // Parse bundled short flags (`-nc`, `-nf prog.jq`, `-Lmods`, etc.).
+            let short = &arg[1..];
+            let mut advance = 1usize;
+            let mut consumed_rest = false;
+            for (idx, ch) in short.char_indices() {
+                match ch {
+                    'n' => {
+                        parsed.null_input = true;
+                    }
+                    'f' => {
+                        let rest_idx = idx + ch.len_utf8();
+                        if rest_idx < short.len() {
+                            parsed.filter_file = Some(short[rest_idx..].to_string());
+                        } else if let Some(path) = args.get(i + 1) {
+                            parsed.filter_file = Some(path.clone());
+                            advance += 1;
+                        }
+                        consumed_rest = true;
+                        break;
+                    }
+                    'L' => {
+                        let rest_idx = idx + ch.len_utf8();
+                        if rest_idx >= short.len() && args.get(i + 1).is_some() {
+                            advance += 1;
+                        }
+                        consumed_rest = true;
+                        break;
+                    }
+                    _ => {
+                        // All other documented short flags are no-arg toggles (e.g. -R,
+                        // -s, -c, -r, -j, -a, -S, -C, -M, -e, -V, -h, -b). Unknown ones
+                        // are ignored here and left to jq itself.
+                    }
+                }
+            }
+            if consumed_rest {
+                i += advance;
+                continue;
+            }
             i += 1;
             continue;
         }
 
-        positional.push(arg.clone());
-        i += 1;
-    }
-
-    if parsed.filter_file.is_none() {
-        if let Some((first, rest)) = positional.split_first() {
-            parsed.filter_expr = Some(first.clone());
-            parsed.input_files.extend(rest.iter().cloned());
+        if parsed.filter_file.is_none() && parsed.filter_expr.is_none() {
+            parsed.filter_expr = Some(arg.clone());
+        } else if !positional_are_args {
+            parsed.input_files.push(arg.clone());
         }
-    } else {
-        parsed.input_files = positional;
+        i += 1;
     }
 
     parsed
@@ -379,5 +425,77 @@ mod tests {
         let parsed = parse_jq_invocation(&args);
         assert_eq!(parsed.filter_expr, Some(". + $x + $y".to_string()));
         assert_eq!(parsed.input_files, vec!["input.json".to_string()]);
+    }
+
+    #[test]
+    fn parse_short_bundle_null_input() {
+        let args = vec![
+            "-nc".to_string(),
+            "null | if . == true or . == false then 1 else error end".to_string(),
+        ];
+        let parsed = parse_jq_invocation(&args);
+        assert!(parsed.null_input);
+        assert_eq!(
+            parsed.filter_expr,
+            Some("null | if . == true or . == false then 1 else error end".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_short_bundle_with_filter_file_argument() {
+        let args = vec![
+            "-nf".to_string(),
+            "prog.jq".to_string(),
+            "input.json".to_string(),
+        ];
+        let parsed = parse_jq_invocation(&args);
+        assert!(parsed.null_input);
+        assert_eq!(parsed.filter_file, Some("prog.jq".to_string()));
+        assert_eq!(parsed.input_files, vec!["input.json".to_string()]);
+    }
+
+    #[test]
+    fn parse_indent_and_library_path_options() {
+        let args = vec![
+            "--indent".to_string(),
+            "2".to_string(),
+            "--library-path=./mods".to_string(),
+            ".".to_string(),
+            "input.json".to_string(),
+        ];
+        let parsed = parse_jq_invocation(&args);
+        assert_eq!(parsed.filter_expr, Some(".".to_string()));
+        assert_eq!(parsed.input_files, vec!["input.json".to_string()]);
+    }
+
+    #[test]
+    fn parse_args_consumes_remaining_positionals() {
+        let args = vec![
+            "-n".to_string(),
+            "--args".to_string(),
+            "$ARGS.positional[0]".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+        ];
+        let parsed = parse_jq_invocation(&args);
+        assert!(parsed.null_input);
+        assert_eq!(parsed.filter_expr, Some("$ARGS.positional[0]".to_string()));
+        assert!(parsed.input_files.is_empty());
+    }
+
+    #[test]
+    fn parse_dash_as_input_file() {
+        let args = vec![".".to_string(), "-".to_string()];
+        let parsed = parse_jq_invocation(&args);
+        assert_eq!(parsed.filter_expr, Some(".".to_string()));
+        assert_eq!(parsed.input_files, vec!["-".to_string()]);
+    }
+
+    #[test]
+    fn parse_run_tests_consumes_optional_path() {
+        let args = vec!["--run-tests".to_string(), "tests.jq".to_string()];
+        let parsed = parse_jq_invocation(&args);
+        assert_eq!(parsed.filter_expr, None);
+        assert!(parsed.input_files.is_empty());
     }
 }
