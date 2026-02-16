@@ -42,11 +42,12 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
             bin: jqv
-          - os: macos-13
+          # macos-13 was retired in late 2025; use the supported Intel label.
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: tar.gz
             bin: jqv
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             archive: tar.gz
             bin: jqv
