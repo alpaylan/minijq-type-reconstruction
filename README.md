@@ -1,5 +1,14 @@
 # Type Reconstruction Prototype (`minijq`)
 
+Install latest `jqv` (macOS/Linux):
+
+```bash
+curl -fsSL https://github.com/alpaylan/minijq-type-reconstruction/releases/latest/download/jqv-installer.sh | sh
+```
+
+Installer script asset: [`jqv-installer.sh`](https://github.com/alpaylan/minijq-type-reconstruction/releases/latest/download/jqv-installer.sh)
+Latest Linux binary asset: [`jqv-x86_64-unknown-linux-gnu.tar.gz`](https://github.com/alpaylan/minijq-type-reconstruction/releases/latest/download/jqv-x86_64-unknown-linux-gnu.tar.gz)
+
 > Note!
 > This repo is mostly a research prototype I've whipped up with Codex, it's possible there are some
 > some empty corners.
@@ -192,7 +201,7 @@ JQ_BIN=/usr/local/bin/jq ./target/release/jqv '.foo' input.json
 ### CI and Release
 
 - `.github/workflows/ci.yml`: runs formatting checks and tests on PRs/pushes.
-- `.github/workflows/release.yml`: on tag pushes like `v0.1.0`, builds `jqv` for Linux/macOS/Windows and publishes archives plus `SHA256SUMS.txt` to GitHub Releases.
+- `.github/workflows/release.yml`: on tag pushes like `v0.1.0`, builds `jqv` for Linux/macOS/Windows and publishes archives, `jqv-installer.sh`, and `SHA256SUMS.txt` to GitHub Releases.
 
 ## Curated Examples
 

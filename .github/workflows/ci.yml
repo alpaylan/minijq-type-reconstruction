@@ -31,5 +31,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Validate installer script
+        run: bash -n jqv-installer.sh
+
       - name: Run tests
         run: cargo test --locked

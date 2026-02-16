@@ -28,6 +28,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Validate installer script
+        run: bash -n jqv-installer.sh
+
       - name: Run tests
         run: cargo test --locked
 
@@ -99,12 +102,19 @@ jobs:
       - build
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           pattern: jqv-*
           merge-multiple: true
+
+      - name: Add installer script
+        run: |
+          cp jqv-installer.sh dist/jqv-installer.sh
+          chmod +x dist/jqv-installer.sh
 
       - name: Generate checksums
         run: |
