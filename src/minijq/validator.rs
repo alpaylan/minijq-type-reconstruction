@@ -444,7 +444,8 @@ fn preview_array_type(items: &[Value]) -> Type {
         return Type::Tuple(items.iter().map(preview_type).collect()).normalize();
     }
 
-    let element = Type::union(items.iter().take(MAX_PREVIEW_ARRAY_ITEMS).map(preview_type)).normalize();
+    let element =
+        Type::union(items.iter().take(MAX_PREVIEW_ARRAY_ITEMS).map(preview_type)).normalize();
     Type::NonEmptyArray(Box::new(element)).normalize()
 }
 

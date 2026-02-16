@@ -110,9 +110,7 @@ pub fn parse_definitions(source: &str) -> Result<Vec<Definition>, DefParseError>
                     i += 1;
                 }
                 b')' => {
-                    if depth_paren > 0 {
-                        depth_paren -= 1;
-                    }
+                    depth_paren = depth_paren.saturating_sub(1);
                     i += 1;
                 }
                 b'[' => {
@@ -120,9 +118,7 @@ pub fn parse_definitions(source: &str) -> Result<Vec<Definition>, DefParseError>
                     i += 1;
                 }
                 b']' => {
-                    if depth_bracket > 0 {
-                        depth_bracket -= 1;
-                    }
+                    depth_bracket = depth_bracket.saturating_sub(1);
                     i += 1;
                 }
                 b'{' => {
@@ -130,9 +126,7 @@ pub fn parse_definitions(source: &str) -> Result<Vec<Definition>, DefParseError>
                     i += 1;
                 }
                 b'}' => {
-                    if depth_brace > 0 {
-                        depth_brace -= 1;
-                    }
+                    depth_brace = depth_brace.saturating_sub(1);
                     i += 1;
                 }
                 _ => {

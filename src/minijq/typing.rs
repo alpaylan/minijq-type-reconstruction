@@ -695,7 +695,7 @@ fn compare_atom_pair(op: BinaryOp, left: &ComparisonAtom, right: &ComparisonAtom
                 (Some(l), Some(r)) => l
                     .partial_cmp(&r)
                     .map(|ord| compare_known_ordering(op, ord))
-                    .unwrap_or_else(|| compare_unknown_ordering()),
+                    .unwrap_or_else(compare_unknown_ordering),
                 _ => compare_unknown_ordering(),
             }
         }
@@ -767,9 +767,9 @@ fn compare_bool_domains(op: BinaryOp, left: Option<bool>, right: Option<bool>) -
     for lhs in left_values {
         for rhs in &right_values {
             out.record(match op {
-                BinaryOp::Lt => lhs < *rhs,
+                BinaryOp::Lt => !lhs & *rhs,
                 BinaryOp::Lte => lhs <= *rhs,
-                BinaryOp::Gt => lhs > *rhs,
+                BinaryOp::Gt => lhs & !*rhs,
                 BinaryOp::Gte => lhs >= *rhs,
                 _ => false,
             });

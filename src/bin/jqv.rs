@@ -7,9 +7,9 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 use typereconstruction::minijq::{
-    CachedReconstruction, ReconstructionConfig, ReconstructionResult, TypeCache,
-    infer_expr_scheme, infer_expr_type, infer_predicate_refinement, parse_expr,
-    reconstruct_input_type_with_scheme, validate_input_against_reconstruction,
+    CachedReconstruction, ReconstructionConfig, ReconstructionResult, TypeCache, infer_expr_scheme,
+    infer_expr_type, infer_predicate_refinement, parse_expr, reconstruct_input_type_with_scheme,
+    validate_input_against_reconstruction,
 };
 
 const DEFAULT_TYPE_CACHE_PATH: &str = ".minijq.typecache.mjqi";
@@ -58,11 +58,10 @@ fn parse_jq_invocation(args: &[String]) -> ParsedInvocation {
                 }
                 if long == "run-tests" {
                     i += 1;
-                    if let Some(next) = args.get(i) {
-                        if !next.starts_with('-') {
+                    if let Some(next) = args.get(i)
+                        && !next.starts_with('-') {
                             i += 1;
                         }
-                    }
                     continue;
                 }
                 if long == "from-file" {
@@ -306,11 +305,10 @@ fn run_validator_diagnostics(filter_source: &str, input: &Value) -> Result<(), S
         "  Runtime-informed scheme: {} -> {}",
         result.inferred_scheme.input, result.inferred_scheme.output
     );
-    if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type) {
-        if refinement.has_information() {
+    if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type)
+        && refinement.has_information() {
             eprintln!("  Predicate refinement: {}", refinement.pretty());
         }
-    }
     for line in report.pretty().lines() {
         eprintln!("  {line}");
     }

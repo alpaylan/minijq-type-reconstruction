@@ -439,12 +439,11 @@ fn analyze_definition_file(
             "  Scheme: {} -> {}",
             result.inferred_scheme.input, result.inferred_scheme.output
         );
-        if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type) {
-            if refinement.has_information() {
+        if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type)
+            && refinement.has_information() {
                 let note = refinement.pretty();
                 println!("  Predicate refinement: {}", note);
             }
-        }
         println!("  Final input type: {}", result.annotated_input_type());
         println!("  Converged: {}", result.converged);
         if options.trace {
@@ -520,11 +519,10 @@ fn run_examples(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
     let cache_enabled = type_cache.is_some();
 
     for (idx, example) in all_examples().into_iter().enumerate() {
-        if let Some(name) = &options.only_program {
-            if example.name != name {
+        if let Some(name) = &options.only_program
+            && example.name != name {
                 continue;
             }
-        }
         matched = true;
 
         let baseline_scheme = infer_expr_scheme(&example.expr);
@@ -616,11 +614,9 @@ fn run_examples(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
         );
         if let Some(refinement) =
             infer_predicate_refinement(&example.expr, &result.final_input_type)
-        {
-            if refinement.has_information() {
+            && refinement.has_information() {
                 println!("  Predicate refinement: {}", refinement.pretty());
             }
-        }
         println!("  Final input type: {}", result.annotated_input_type());
         if !result.subset_types.is_empty() {
             let subsets = result
@@ -664,8 +660,8 @@ fn run_examples(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
         println!();
     }
 
-    if let Some(cache) = type_cache.as_mut() {
-        if let Some(path) = options.type_cache_path.as_ref() {
+    if let Some(cache) = type_cache.as_mut()
+        && let Some(path) = options.type_cache_path.as_ref() {
             match cache.save_if_dirty() {
                 Ok(saved) => {
                     if saved {
@@ -677,18 +673,16 @@ fn run_examples(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
                 }
             }
         }
-    }
 
     if cache_enabled && matched {
         println!("Type cache stats: {cache_hits} hit(s), {cache_misses} miss(es)");
     }
 
-    if let Some(name) = &options.only_program {
-        if !matched {
+    if let Some(name) = &options.only_program
+        && !matched {
             eprintln!("no example named `{name}`");
             return 1;
         }
-    }
 
     0
 }
@@ -780,11 +774,10 @@ fn run_validation(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
                     converged: reconstructed.converged,
                 },
             );
-            if let Some(path) = options.type_cache_path.as_ref() {
-                if let Err(err) = cache.save_if_dirty() {
+            if let Some(path) = options.type_cache_path.as_ref()
+                && let Err(err) = cache.save_if_dirty() {
                     eprintln!("warning: failed to save type cache `{path}`: {err}");
                 }
-            }
         }
         reconstructed
     };
@@ -799,11 +792,10 @@ fn run_validation(options: &CliOptions, config: &ReconstructionConfig) -> i32 {
         "  Runtime-informed scheme: {} -> {}",
         result.inferred_scheme.input, result.inferred_scheme.output
     );
-    if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type) {
-        if refinement.has_information() {
+    if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type)
+        && refinement.has_information() {
             println!("  Predicate refinement: {}", refinement.pretty());
         }
-    }
     println!(
         "  Reconstructed input domain: {}",
         result.annotated_input_type()
