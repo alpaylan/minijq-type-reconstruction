@@ -59,9 +59,10 @@ fn parse_jq_invocation(args: &[String]) -> ParsedInvocation {
                 if long == "run-tests" {
                     i += 1;
                     if let Some(next) = args.get(i)
-                        && !next.starts_with('-') {
-                            i += 1;
-                        }
+                        && !next.starts_with('-')
+                    {
+                        i += 1;
+                    }
                     continue;
                 }
                 if long == "from-file" {
@@ -306,9 +307,10 @@ fn run_validator_diagnostics(filter_source: &str, input: &Value) -> Result<(), S
         result.inferred_scheme.input, result.inferred_scheme.output
     );
     if let Some(refinement) = infer_predicate_refinement(&expr, &result.final_input_type)
-        && refinement.has_information() {
-            eprintln!("  Predicate refinement: {}", refinement.pretty());
-        }
+        && refinement.has_information()
+    {
+        eprintln!("  Predicate refinement: {}", refinement.pretty());
+    }
     for line in report.pretty().lines() {
         eprintln!("  {line}");
     }
