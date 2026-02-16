@@ -1,3 +1,4 @@
+warning: failed to load type cache `.minijq.typecache.mjqi` (invalid let declaration at .minijq.typecache.mjqi:4); starting with empty cache
 Validation target:
   Filter: .metrics.a + .metrics.b
   Baseline static scheme: Object{metrics: Object{a: Number, b: Number, ..R1}, ..R0} -> Number

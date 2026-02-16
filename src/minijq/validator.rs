@@ -1,9 +1,13 @@
 use crate::minijq::eval::RuntimeTypeError;
-use crate::minijq::types::{RowTail, Type};
+use crate::minijq::types::{ObjectShape, RowTail, Type};
 use serde_json::Value;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 
 const MAX_ISSUES: usize = 16;
+const MAX_PREVIEW_ARRAY_ITEMS: usize = 16;
+const MAX_PREVIEW_OBJECT_FIELDS: usize = 32;
+const MAX_PREVIEW_STRING_LITERAL_LEN: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationIssueKind {
@@ -130,7 +134,7 @@ pub fn validate_input_against_reconstruction(
     subset_types: &[Type],
     runtime_error: Option<&RuntimeTypeError>,
 ) -> SchemeValidationReport {
-    let actual_input_type = Type::from_json_value(input).normalize();
+    let actual_input_type = preview_type(input).normalize();
     let mut issues = validate_value_against_type(input, reconstructed_input_type);
     issues.sort_by_key(|issue| {
         let (depth, specificity) = issue.score();
@@ -143,7 +147,7 @@ pub fn validate_input_against_reconstruction(
     let subset_hits = subset_types
         .iter()
         .map(|ty| ty.clone().normalize())
-        .filter(|subset| !actual_input_type.intersect(subset).normalize().is_never())
+        .filter(|subset| validate_value_against_type(input, subset).is_empty())
         .collect::<Vec<_>>();
 
     SchemeValidationReport {
@@ -173,36 +177,47 @@ fn validate_value_against_type_at(
     }
 
     let expected = expected.clone().normalize();
-    let actual = Type::from_json_value(value).normalize();
-    if actual.is_subtype_of(&expected) {
-        return;
-    }
 
     match expected {
-        Type::Any => {}
-        Type::Never => {
-            issues.push(ValidationIssue {
-                path,
-                kind: ValidationIssueKind::TypeMismatch {
-                    expected: Type::Never,
-                    actual,
-                },
-            });
+        Type::Any | Type::Generic(_) => {}
+        Type::Never => push_mismatch(path, Type::Never, value, issues),
+        Type::Null => {
+            if !matches!(value, Value::Null) {
+                push_mismatch(path, Type::Null, value, issues);
+            }
         }
+        Type::Bool => {
+            if !matches!(value, Value::Bool(_)) {
+                push_mismatch(path, Type::Bool, value, issues);
+            }
+        }
+        Type::BoolLiteral(expected_bool) => match value {
+            Value::Bool(actual_bool) if *actual_bool == expected_bool => {}
+            _ => push_mismatch(path, Type::BoolLiteral(expected_bool), value, issues),
+        },
+        Type::Number => {
+            if !matches!(value, Value::Number(_)) {
+                push_mismatch(path, Type::Number, value, issues);
+            }
+        }
+        Type::NumberLiteral(expected_number) => match value {
+            Value::Number(actual_number) if actual_number.to_string() == expected_number => {}
+            _ => push_mismatch(path, Type::NumberLiteral(expected_number), value, issues),
+        },
+        Type::String => {
+            if !matches!(value, Value::String(_)) {
+                push_mismatch(path, Type::String, value, issues);
+            }
+        }
+        Type::StringLiteral(expected_string) => match value {
+            Value::String(actual_string) if *actual_string == expected_string => {}
+            _ => push_mismatch(path, Type::StringLiteral(expected_string), value, issues),
+        },
         Type::Union(items) => validate_union(value, items, path, issues),
         Type::Array(elem) => validate_array(value, &elem, path, issues, false),
         Type::NonEmptyArray(elem) => validate_array(value, &elem, path, issues, true),
         Type::Tuple(items) => validate_tuple(value, &items, path, issues),
         Type::Object(shape) => validate_object(value, &shape.fields, &shape.tail, path, issues),
-        primitive => {
-            issues.push(ValidationIssue {
-                path,
-                kind: ValidationIssueKind::TypeMismatch {
-                    expected: primitive,
-                    actual,
-                },
-            });
-        }
     }
 }
 
@@ -222,7 +237,7 @@ fn validate_union(
         branch_issues.push(local);
     }
 
-    let actual = Type::from_json_value(value).normalize();
+    let actual = preview_type(value).normalize();
     if branch_issues
         .iter()
         .all(|local| local.len() == 1 && local[0].path == path)
@@ -263,7 +278,7 @@ fn validate_array(
                 } else {
                     Type::Array(Box::new(elem.clone()))
                 },
-                actual: Type::from_json_value(value),
+                actual: preview_type(value),
             },
         });
         return;
@@ -296,7 +311,7 @@ fn validate_tuple(
             path,
             kind: ValidationIssueKind::TypeMismatch {
                 expected: Type::Tuple(expected_items.to_vec()),
-                actual: Type::from_json_value(value),
+                actual: preview_type(value),
             },
         });
         return;
@@ -332,11 +347,11 @@ fn validate_object(
         issues.push(ValidationIssue {
             path,
             kind: ValidationIssueKind::TypeMismatch {
-                expected: Type::Object(crate::minijq::types::ObjectShape {
+                expected: Type::Object(ObjectShape {
                     fields: expected_fields.clone(),
                     tail: tail.clone(),
                 }),
-                actual: Type::from_json_value(value),
+                actual: preview_type(value),
             },
         });
         return;
@@ -387,6 +402,71 @@ fn validate_object(
             RowTail::Var(_) => {}
         }
     }
+}
+
+fn push_mismatch(path: String, expected: Type, value: &Value, issues: &mut Vec<ValidationIssue>) {
+    if issues.len() >= MAX_ISSUES {
+        return;
+    }
+
+    issues.push(ValidationIssue {
+        path,
+        kind: ValidationIssueKind::TypeMismatch {
+            expected,
+            actual: preview_type(value).normalize(),
+        },
+    });
+}
+
+fn preview_type(value: &Value) -> Type {
+    match value {
+        Value::Null => Type::Null,
+        Value::Bool(b) => Type::BoolLiteral(*b),
+        Value::Number(n) => Type::NumberLiteral(n.to_string()),
+        Value::String(s) => {
+            if s.len() <= MAX_PREVIEW_STRING_LITERAL_LEN {
+                Type::StringLiteral(s.clone())
+            } else {
+                Type::String
+            }
+        }
+        Value::Array(items) => preview_array_type(items),
+        Value::Object(map) => preview_object_type(map),
+    }
+}
+
+fn preview_array_type(items: &[Value]) -> Type {
+    if items.is_empty() {
+        return Type::Tuple(Vec::new());
+    }
+
+    if items.len() <= MAX_PREVIEW_ARRAY_ITEMS {
+        return Type::Tuple(items.iter().map(preview_type).collect()).normalize();
+    }
+
+    let element = Type::union(items.iter().take(MAX_PREVIEW_ARRAY_ITEMS).map(preview_type)).normalize();
+    Type::NonEmptyArray(Box::new(element)).normalize()
+}
+
+fn preview_object_type(map: &serde_json::Map<String, Value>) -> Type {
+    if map.len() <= MAX_PREVIEW_OBJECT_FIELDS {
+        let fields = map
+            .iter()
+            .map(|(k, v)| (k.clone(), preview_type(v)))
+            .collect();
+        return Type::Object(ObjectShape::closed(fields)).normalize();
+    }
+
+    let mut fields = BTreeMap::new();
+    for (k, v) in map.iter().take(MAX_PREVIEW_OBJECT_FIELDS) {
+        fields.insert(k.clone(), preview_type(v));
+    }
+
+    Type::Object(ObjectShape {
+        fields,
+        tail: RowTail::Open(Box::new(Type::Any)),
+    })
+    .normalize()
 }
 
 #[cfg(test)]

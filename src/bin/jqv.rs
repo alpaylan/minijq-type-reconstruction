@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 use typereconstruction::minijq::{
-    CachedReconstruction, ReconstructionConfig, ReconstructionResult, TypeCache, eval,
+    CachedReconstruction, ReconstructionConfig, ReconstructionResult, TypeCache,
     infer_expr_scheme, infer_expr_type, infer_predicate_refinement, parse_expr,
     reconstruct_input_type_with_scheme, validate_input_against_reconstruction,
 };
@@ -292,12 +292,11 @@ fn run_validator_diagnostics(filter_source: &str, input: &Value) -> Result<(), S
 
     let expr = parse_expr(filter_source)
         .map_err(|err| format!("filter parse failed for validator replay: {err}"))?;
-    let runtime_error = eval(&expr, input).err();
     let report = validate_input_against_reconstruction(
         input,
         &result.final_input_type,
         &result.subset_types,
-        runtime_error.as_ref(),
+        None,
     );
 
     eprintln!("jqv validator:");
@@ -314,10 +313,6 @@ fn run_validator_diagnostics(filter_source: &str, input: &Value) -> Result<(), S
     }
     for line in report.pretty().lines() {
         eprintln!("  {line}");
-    }
-
-    if runtime_error.is_none() {
-        eprintln!("  note: jq failed but minijq replay did not reproduce a runtime error.");
     }
 
     Ok(())
